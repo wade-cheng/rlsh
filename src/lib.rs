@@ -4,14 +4,14 @@ use std::{
     process::exit,
 };
 
-enum Command {
+enum Command<'a> {
     Clear,
     Exit,
     Jobs,
     Bg,
     Fg,
     Noop,
-    NonBuiltin(String),
+    NonBuiltin(&'a str),
 }
 
 pub struct App;
@@ -85,7 +85,7 @@ impl App {
             Some("bg") => Command::Bg,
             Some("jobs") => Command::Jobs,
             Some("exit") => Command::Exit,
-            Some(_) => Command::NonBuiltin(input.to_string()),
+            Some(_) => Command::NonBuiltin(input),
             None => Command::Noop,
         }
     }
