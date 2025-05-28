@@ -1,6 +1,7 @@
 use std::{
     env,
     io::{self, Write},
+    path::PathBuf,
     process::exit,
 };
 
@@ -29,9 +30,7 @@ impl App {
             "{}@{} {} $ ",
             whoami::username(),
             whoami::devicename(),
-            env::current_dir()
-                .unwrap_or(["?"].iter().collect())
-                .display()
+            env::current_dir().unwrap_or(PathBuf::from("?")).display()
         );
         io::stdout().flush().unwrap();
     }
