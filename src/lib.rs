@@ -5,6 +5,7 @@ use std::{
 };
 
 enum Command {
+    Clear,
     Exit,
     Jobs,
     Bg,
@@ -55,6 +56,11 @@ impl App {
     fn eval(input: &str) {
         let command = Self::parse(input);
         match command {
+            Command::Clear => {
+                // use magic control sequence to clear the screen and position the
+                // cursor at 1,1.
+                print!("\x1B[2J\x1B[1;1H");
+            }
             Command::Exit => exit(0),
             Command::Jobs => println!("Jobsing"),
             Command::Bg => println!("Bging"),
@@ -72,6 +78,7 @@ impl App {
     fn parse(input: &str) -> Command {
         let first_word = input.split_whitespace().next();
         match first_word {
+            Some("clear") => Command::Clear,
             Some("fg") => Command::Fg,
             Some("bg") => Command::Bg,
             Some("jobs") => Command::Jobs,
