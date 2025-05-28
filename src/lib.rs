@@ -59,6 +59,8 @@ impl App {
             Command::Clear => {
                 // use magic control sequence to clear the screen and position the
                 // cursor at 1,1.
+                // TODO: I've been a fool; clear is a terminal command, not a builtin :0
+                // TODO: remove once we actually implement more of the shell.
                 print!("\x1B[2J\x1B[1;1H");
             }
             Command::Exit => exit(0),
