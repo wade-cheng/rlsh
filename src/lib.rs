@@ -44,8 +44,6 @@ impl App {
 
             input_buffer.clear();
         }
-
-        unreachable!();
     }
 
     fn eval(input: &str) {
