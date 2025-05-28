@@ -42,9 +42,7 @@ impl App {
 
             match io::stdin().read_line(&mut input_buffer) {
                 Ok(0) => return, // exit on EOF (CTRL-D)
-                Ok(_) => {
-                    Self::eval(&input_buffer);
-                }
+                Ok(_) => Self::eval(&input_buffer),
                 Err(_) => panic!(),
             }
 
