@@ -1,4 +1,5 @@
 use std::{
+    env,
     io::{self, Write},
     process::exit,
 };
@@ -12,27 +13,32 @@ enum Command {
     NonBuiltin(String),
 }
 
-pub struct App {
-    /// The prompt for the shell.
-    /// For reference, this is `pc@user MINGW64 pwd $ ` on git bash.
-    /// TODO: we should implement better than a static string.
-    /// It should at least be able to read from `pwd`.
-    prompt: String,
-}
+pub struct App;
 
 impl App {
     pub fn new() -> Self {
-        App {
-            prompt: "> ".to_string(),
-        }
+        App
+    }
+
+    /// Prints the prompt for the shell.
+    ///
+    /// That is, the thing that looks like `user@device ~/... $`.
+    fn print_prompt() {
+        print!(
+            "{}@{} {} $ ",
+            whoami::username(),
+            whoami::devicename(),
+            env::current_dir()
+                .unwrap_or(["?"].iter().collect())
+                .display()
+        );
+        io::stdout().flush().unwrap();
     }
 
     pub fn run(self) {
         let mut input_buffer = String::new();
         loop {
-            // print prompt
-            print!("{}", &self.prompt);
-            io::stdout().flush().unwrap();
+            Self::print_prompt();
 
             match io::stdin().read_line(&mut input_buffer) {
                 Ok(0) => return, // exit on EOF (CTRL-D)
