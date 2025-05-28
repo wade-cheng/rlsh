@@ -1,5 +1,3 @@
-use std::{cell::RefCell, cmp};
-
 const MAXJOBS: usize = 64;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
