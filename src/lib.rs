@@ -1,4 +1,7 @@
 mod game;
+mod job_list;
+
+use job_list::State;
 
 use std::{
     env,
@@ -11,13 +14,22 @@ use std::{
 ///
 /// These include the builtin commands for the shell, and a catch-all
 /// NonBuiltin variant that contains the string.
-enum Builtin<'a> {
+enum Builtin {
     Exit,
     Jobs,
     Bg,
     Fg,
     Noop,
-    NonBuiltin(&'a str),
+    NonBuiltin,
+}
+
+struct CommandData<'a> {
+    command: &'a str,
+    args: Vec<&'a str>,
+    infile: Option<&'a str>,
+    outfile: Option<&'a str>,
+    command_type: Builtin,
+    state: State,
 }
 
 pub struct App;
@@ -61,28 +73,31 @@ impl App {
     /// string to execve (or whatever the command is).
     fn eval(input: &str) {
         let command = Self::parse(input);
-        match command {
+        match command.command_type {
             Builtin::Exit => exit(0),
             Builtin::Jobs => println!("Jobsing"),
             Builtin::Bg => println!("Bging"),
             Builtin::Fg => println!("Fging"),
             Builtin::Noop => {}
-            Builtin::NonBuiltin(s) => match game::parse(s) {
+            Builtin::NonBuiltin => match game::parse(command.command) {
                 Ok(()) => {}
-                Err(()) => Self::run_command(s),
+                Err(()) => Self::run_command(command),
             },
         }
     }
 
-    fn run_command(s: &str) {
-        let words: Vec<&str> = s.split_whitespace().collect();
-        let (command, args) = (words[0], words.get(1..).unwrap_or(&[]));
+    fn run_command(command: CommandData) {
 
         // cd is supposed to be a shell builtin. it breaks on windows when we feed it
         // to Command.
         // TODO: implement this more formally.
-        if command == "cd" {
-            match args.len() {
+        dbg!(command.state);
+        dbg!(command.infile);
+        dbg!(command.outfile);
+        dbg!(command.command);
+        dbg!(command.args.clone());
+        if command.command == "cd" {
+            match command.args.len() {
                 0 => {
                     println!("cd with 0 args unimplemented");
                     return;
@@ -93,14 +108,14 @@ impl App {
                     return;
                 }
             };
-            env::set_current_dir(args[0]).unwrap_or_else(|_| println!("cd errored"));
+            env::set_current_dir(command.args[0]).unwrap_or_else(|_| println!("cd errored"));
             return;
         }
 
-        match Command::new(command).args(args).status() {
+        match Command::new(command.command).args(command.args).status() {
             Ok(_) => (),
             Err(error) => match error.kind() {
-                ErrorKind::NotFound => println!("{} not found.", command),
+                ErrorKind::NotFound => println!("{} not found.", command.command),
                 _ => println!("unknown error."), // uhhh. todo.
             },
         };
@@ -111,15 +126,67 @@ impl App {
     /// Note that we match for builtins on the first word.
     /// This means `fg`, `fg sidjf`, and `fg --help` will return `Command::Fg`,
     /// but `fg___` will not.
-    fn parse(input: &str) -> Builtin {
-        let first_word = input.split_whitespace().next();
-        match first_word {
-            Some("fg") => Builtin::Fg,
-            Some("bg") => Builtin::Bg,
-            Some("jobs") => Builtin::Jobs,
-            Some("exit") => Builtin::Exit,
-            Some(_) => Builtin::NonBuiltin(input),
-            None => Builtin::Noop,
+    fn parse(input: &str) -> CommandData {
+        let mut input: Vec<&str> = input.split_whitespace().collect();
+
+        // first check if this is a foreground or background job
+        let last_word = input.last();
+        let state = match last_word {
+            Some(&"&") => {
+                input.pop(); 
+                State::BG
+            },
+            _ => State::FG,
+        };
+
+        // Check for specified stdout and stdin
+        let (infile, mut input) = match input.iter().position(|x| x == &"<"){
+            Some(i) => {
+                let mut new_input = input.split_off(i);
+                new_input.remove(0);
+                (input.last().map(|v| *v), new_input)
+            },
+            None => (None, input),
+        };
+
+        let outfile = match input.iter().position(|x| x == &">"){
+            Some(i) => {
+                let outvec = input.split_off(i);
+                outvec.get(1).map(|v| *v)
+            },
+            None => None,
+        };
+
+        // if empty then return no op
+        if input.len() == 0 {
+            return CommandData {
+                command: &"",
+                args: vec![],
+                infile,
+                outfile,
+                command_type: Builtin::Noop,
+                state,
+            }
+        }
+
+        // extract command
+        let command = input.remove(0);
+
+        let command_type = match command {
+            "fg" => Builtin::Fg,
+            "bg" => Builtin::Bg,
+            "jobs" => Builtin::Jobs,
+            "exit" => Builtin::Exit,
+            _ => Builtin::NonBuiltin,
+        };
+
+        CommandData { 
+            command, 
+            args: input,
+            infile, 
+            outfile, 
+            command_type,
+            state,
         }
     }
 }
