@@ -2,7 +2,7 @@ mod game;
 
 use std::{
     env,
-    io::{self, Write},
+    io::{self, ErrorKind, Write},
     path::PathBuf,
     process::{Command, exit},
 };
@@ -85,20 +85,25 @@ impl App {
             match args.len() {
                 0 => {
                     println!("cd with 0 args unimplemented");
+                    return;
                 }
                 1 => {}
                 _ => {
                     println!("cd with more than one arg unimplemented");
+                    return;
                 }
             };
             env::set_current_dir(args[0]).unwrap_or_else(|_| println!("cd errored"));
             return;
         }
 
-        Command::new(command)
-            .args(args)
-            .status()
-            .expect("command failed to start");
+        match Command::new(command).args(args).status() {
+            Ok(_) => (),
+            Err(error) => match error.kind() {
+                ErrorKind::NotFound => println!("{} not found.", command),
+                _ => println!("unknown error."), // uhhh. todo.
+            },
+        };
     }
 
     /// Parses a command line input into a `Command`.
