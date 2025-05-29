@@ -67,10 +67,7 @@ impl App {
             Builtin::Bg => println!("Bging"),
             Builtin::Fg => println!("Fging"),
             Builtin::Noop => {}
-            Builtin::NonBuiltin(s) => match game::parse(s) {
-                Ok(()) => {}
-                Err(()) => Self::run_command(s),
-            },
+            Builtin::NonBuiltin(s) => Self::run_command(s),
         }
     }
 
