@@ -22,6 +22,7 @@ struct JobData<'a> {
 }
 
 // List to manage jobs
+#[derive(Clone)]
 pub struct JobList<'a>(Arc<Mutex<JobData<'a>>>);
 
 impl<'a> JobList<'a> {
