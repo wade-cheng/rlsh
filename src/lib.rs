@@ -1,3 +1,5 @@
+mod game;
+
 use std::{
     env,
     io::{self, Write},
@@ -50,6 +52,10 @@ impl App {
         }
     }
 
+    /// Parses the input and matches on it. If the input is a builtin, we do the
+    /// corresponding operation. If we could not recognize a builtin, we pass it
+    /// to the rlsh game's parser. Finally, if that returns an error, pass the
+    /// string to execve (or whatever the command is).
     fn eval(input: &str) {
         let command = Self::parse(input);
         match command {
@@ -65,7 +71,10 @@ impl App {
             Command::Bg => println!("Bging"),
             Command::Fg => println!("Fging"),
             Command::Noop => {}
-            Command::NonBuiltin(s) => println!("NonBuiltining: {s}"),
+            Command::NonBuiltin(s) => match game::parse(s) {
+                Ok(()) => {}
+                Err(()) => println!("NonBuiltining"),
+            },
         }
     }
 
