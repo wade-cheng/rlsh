@@ -12,7 +12,6 @@ use std::{
 /// These include the builtin commands for the shell, and a catch-all
 /// NonBuiltin variant that contains the string.
 enum Builtin<'a> {
-    Clear,
     Exit,
     Jobs,
     Bg,
@@ -63,13 +62,6 @@ impl App {
     fn eval(input: &str) {
         let command = Self::parse(input);
         match command {
-            Builtin::Clear => {
-                // use magic control sequence to clear the screen and position the
-                // cursor at 1,1.
-                // TODO: I've been a fool; clear is a terminal command, not a builtin :0
-                // TODO: remove once we actually implement more of the shell.
-                print!("\x1B[2J\x1B[1;1H");
-            }
             Builtin::Exit => exit(0),
             Builtin::Jobs => println!("Jobsing"),
             Builtin::Bg => println!("Bging"),
@@ -117,7 +109,6 @@ impl App {
     fn parse(input: &str) -> Builtin {
         let first_word = input.split_whitespace().next();
         match first_word {
-            Some("clear") => Builtin::Clear,
             Some("fg") => Builtin::Fg,
             Some("bg") => Builtin::Bg,
             Some("jobs") => Builtin::Jobs,
