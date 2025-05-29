@@ -1,11 +1,11 @@
-const MAXJOBS: usize = 64;
+use std::cmp;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum State {
     BG,
     FG,
-    ST,
-    NT,
 }
 
 #[derive(Clone, Copy)]
@@ -16,134 +16,117 @@ pub struct Job<'a> {
 }
 
 struct JobData<'a> {
-    jobs: [Job<'a>; MAXJOBS],
+    jobs: HashMap<usize, Job<'a>>,
     fg_job: Option<usize>,
     max_jid: Option<usize>,
 }
 
 // List to manage jobs
-pub struct JobList<'a>(JobData<'a>);
+pub struct JobList<'a>(Arc<Mutex<JobData<'a>>>);
 
 impl<'a> JobList<'a> {
     // Creates a new empty job list
     pub fn new() -> Self {
-        JobList(JobData {
-            jobs: [Job {
-                pid: 0,
-                state: State::NT,
-                cmdline: "",
-            }; MAXJOBS],
+        JobList(Arc::new(Mutex::new(JobData {
+            jobs: HashMap::new(),
             fg_job: None,
             max_jid: None,
-        })
+        })))
     }
 
     // Gets the job with the assiciated jid
     pub fn get(&self, jid: usize) -> Option<Job> {
-        let JobList(job_data) = self;
-        let job =job_data.jobs.get(jid)?;
-        if job.state == State::NT {
-            return None;
+        let JobList(arc) = self;
+        let job_list = arc.lock().unwrap();
+        match job_list.jobs.get(&jid) {
+            Some(job) => Some(*job),
+            None => None,
         }
-        Some(*job)
     }
 
     // Adds a new value to the job list with the following pid, state, and cmdline and returns its jid
-    pub fn add(&mut self, pid: usize, state: State, cmdline: &'a str) -> Result<usize, &'static str> {
-        if let State::NT = state {
-            return Err("Invalid state for new job");
-        }
-
-        let JobList(job_data) = self;
+    pub fn add(&self, pid: usize, state: State, cmdline: &'a str) -> Result<usize, String> {
+        let JobList(arc) = self;
+        let mut job_list = arc.lock().unwrap();
 
         // Calculate jid of new job
-        let jid = match job_data.max_jid {
+        let jid = match job_list.max_jid {
             None => 0,
-            Some(id) => {
-                if id + 1 >= MAXJOBS {
-                  return Err("Too many jobs");
-                }
-                id + 1
-            },
+            Some(id) => id + 1,
         };
 
         // Update foreground
         if let State::FG = state {
-            if let Some(_) = job_data.fg_job {
+            if let Some(_) = job_list.fg_job {
                 return Err(
-                    "Can't add a foreground job if a foreground job already exists",
+                    "Can't add a foreground job if a foreground job already exists".to_string(),
                 );
             } else {
-                job_data.fg_job = Some(jid)
+                job_list.fg_job = Some(jid)
             }
         }
 
         // update the max jid in the list
-        job_data.max_jid = Some(jid);
-
-        // throw error if insert triggers an override
-        if job_data.jobs[jid].state != State::NT {
-            return Err("Inserted job with duplicate jid");
-        }
+        job_list.max_jid = Some(jid);
 
         // Create job
-        job_data.jobs[jid] = Job {
+        let job = Job {
             pid,
             state,
             cmdline,
         };
 
+        // throw error if insert triggers an override
+        if let Some(_) = job_list.jobs.insert(jid, job) {
+            return Err("Inserted job with duplicate jid".to_string());
+        }
+
         Ok(jid)
     }
 
     // Deletes a job from the job list
-    pub fn delete(&mut self, jid: usize) -> bool {
-        let JobList(job_data) = self;
+    pub fn delete(&self, jid: usize) -> bool {
+        let JobList(arc) = self;
+        let mut job_list = arc.lock().unwrap();
 
-        // out of bounds check
-        if jid >= MAXJOBS {
-            return false;
-        } 
-
-        
-        let job = &mut job_data.jobs[jid];
-
-        // double remove check
-        if let State::NT = job.state {
-            return false;
-        }
-
-        job.state = State::NT;
+        //remove from job list
+        let remove_status = job_list.jobs.remove(&jid);
 
         // update max jid
-        if let Some(id) = job_data.max_jid {
+        if let Some(id) = job_list.max_jid {
             if jid == id {
-                job_data.max_jid = job_data.jobs.iter().rposition(|job| job.state != State::NT);
+                job_list.max_jid = match job_list.jobs.keys().reduce(cmp::max) {
+                    Some(x) => Some(*x),
+                    None => None,
+                };
             }
         }
 
         // update foreground job
-        if let Some(id) = job_data.fg_job {
+        if let Some(id) = job_list.fg_job {
             if id == jid {
-                job_data.fg_job = None
+                job_list.fg_job = None
             }
         }
 
         // return if successful remove
-        true
+        remove_status.is_some()
     }
 
     // gets the jid of the current forground job
     pub fn fg_job(&self) -> Option<usize> {
-        let JobList(job_data) = self;
-        job_data.fg_job
+        let JobList(arc) = self;
+        let job_list = arc.lock().unwrap();
+        job_list.fg_job
     }
 
     // Returns the jid associated with any pid in the job list
     pub fn pid_to_jid(&self, pid: usize) -> Option<usize> {
-        let JobList(job_data) = self;
-        let (jid, _) = job_data.jobs.iter().enumerate().find(|(_, job)| job.state != State::NT && job.pid == pid)?;
-        Some(jid)
+        let JobList(arc) = self;
+        let job_list = arc.lock().unwrap();
+
+        let (jid, _) = job_list.jobs.iter().find(|(_, job)| job.pid == pid)?;
+        Some(*jid)
     }
 
     // Returns the state of any one job
@@ -153,38 +136,42 @@ impl<'a> JobList<'a> {
     }
 
     // Alters the state of a given job
-    // returns true if the job with jid now has state
-    pub fn set_state(&mut self, jid: usize, state: State) -> bool {
-        let JobList(job_data) = self;
+    pub fn set_state(&self, jid: usize, state: State) -> bool {
+        let JobList(arc) = self;
+        let mut job_list = arc.lock().unwrap();
 
-        // checks for valid jid
-        if jid >= MAXJOBS || job_data.jobs[jid].state == State::NT {
-            return false;
-        }
-
-        let job = &mut job_data.jobs[jid];
-
-        // checks if valid state
         if state == State::FG {
-            if let Some(x) = job_data.fg_job {
-                return jid == x;
+            if let Some(x) = job_list.fg_job {
+                if jid != x {
+                    return false;
+                }
             } else {
-                job_data.fg_job = Some(jid);
+                job_list.fg_job = Some(jid);
             }
         }
 
-        // if state doesn't change do nothing
-        if state != job.state {
-            // If removing foreground job update variable
-            if job.state == State::FG {
-                job_data.fg_job = None;
+        let temp = match job_list.jobs.get_mut(&jid) {
+            None => Some(false),
+            Some(job) => {
+                if state == job.state {
+                    Some(true)
+                } else if State::FG == job.state {
+                    job.state = state;
+                    None
+                } else {
+                    job.state = state;
+                    Some(true)
+                }
             }
+        };
 
-            // update state
-            job.state = state;
+        match temp {
+            None => {
+                job_list.fg_job = None;
+                true
+            }
+            Some(b) => b,
         }
-
-        true
     }
 
     // gets the pid associated by a pid
@@ -206,14 +193,14 @@ mod tests {
 
     #[test]
     fn adding_jobs() {
-        let mut list = JobList::new();
+        let list = JobList::new();
         let result = list.add(1, State::FG, "one");
         assert_eq!(Ok(0), result);
         let result = list.add(2, State::BG, "two");
         assert_eq!(Ok(1), result);
         let result = list.add(3, State::FG, "three");
         assert_eq!(
-            Err("Can't add a foreground job if a foreground job already exists"),
+            Err("Can't add a foreground job if a foreground job already exists".to_string()),
             result
         );
         let result = list.add(3, State::BG, "three");
@@ -222,7 +209,7 @@ mod tests {
 
     #[test]
     fn get_jobs() {
-        let mut list = JobList::new();
+        let list = JobList::new();
         list.add(1, State::FG, "one").unwrap();
         list.add(2, State::BG, "two").unwrap();
         list.add(3, State::BG, "three").unwrap();
@@ -240,7 +227,7 @@ mod tests {
 
     #[test]
     fn delete_jobs() {
-        let mut list = JobList::new();
+        let list = JobList::new();
         list.add(1, State::FG, "one").unwrap();
         list.add(2, State::BG, "two").unwrap();
         list.add(3, State::BG, "three").unwrap();
@@ -257,7 +244,7 @@ mod tests {
 
     #[test]
     fn fg_jobs() {
-        let mut list = JobList::new();
+        let list = JobList::new();
         list.add(1, State::BG, "one").unwrap();
         assert_eq!(None, list.fg_job());
         list.add(2, State::FG, "two").unwrap();
@@ -266,7 +253,7 @@ mod tests {
 
     #[test]
     fn pid_to_jid_test() {
-        let mut list = JobList::new();
+        let list = JobList::new();
         list.add(1, State::FG, "one").unwrap();
         list.add(2, State::BG, "two").unwrap();
         list.add(3, State::BG, "three").unwrap();
@@ -278,7 +265,7 @@ mod tests {
 
     #[test]
     fn state_sets() {
-        let mut list = JobList::new();
+        let list = JobList::new();
         list.add(1, State::FG, "one").unwrap();
         assert_eq!(true, list.set_state(0, State::BG));
         assert_eq!(Some(State::BG), list.get_state(0));
