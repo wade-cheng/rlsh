@@ -7,7 +7,11 @@ use std::{
     process::exit,
 };
 
-enum Command<'a> {
+/// Any string can be parsed into one of these variants.
+///
+/// These include the builtin commands for the shell, and a catch-all
+/// NonBuiltin variant that contains the string.
+enum Builtin<'a> {
     Clear,
     Exit,
     Jobs,
@@ -59,19 +63,19 @@ impl App {
     fn eval(input: &str) {
         let command = Self::parse(input);
         match command {
-            Command::Clear => {
+            Builtin::Clear => {
                 // use magic control sequence to clear the screen and position the
                 // cursor at 1,1.
                 // TODO: I've been a fool; clear is a terminal command, not a builtin :0
                 // TODO: remove once we actually implement more of the shell.
                 print!("\x1B[2J\x1B[1;1H");
             }
-            Command::Exit => exit(0),
-            Command::Jobs => println!("Jobsing"),
-            Command::Bg => println!("Bging"),
-            Command::Fg => println!("Fging"),
-            Command::Noop => {}
-            Command::NonBuiltin(s) => match game::parse(s) {
+            Builtin::Exit => exit(0),
+            Builtin::Jobs => println!("Jobsing"),
+            Builtin::Bg => println!("Bging"),
+            Builtin::Fg => println!("Fging"),
+            Builtin::Noop => {}
+            Builtin::NonBuiltin(s) => match game::parse(s) {
                 Ok(()) => {}
                 Err(()) => println!("NonBuiltining"),
             },
@@ -83,16 +87,16 @@ impl App {
     /// Note that we match for builtins on the first word.
     /// This means `fg`, `fg sidjf`, and `fg --help` will return `Command::Fg`,
     /// but `fg___` will not.
-    fn parse(input: &str) -> Command {
+    fn parse(input: &str) -> Builtin {
         let first_word = input.split_whitespace().next();
         match first_word {
-            Some("clear") => Command::Clear,
-            Some("fg") => Command::Fg,
-            Some("bg") => Command::Bg,
-            Some("jobs") => Command::Jobs,
-            Some("exit") => Command::Exit,
-            Some(_) => Command::NonBuiltin(input),
-            None => Command::Noop,
+            Some("clear") => Builtin::Clear,
+            Some("fg") => Builtin::Fg,
+            Some("bg") => Builtin::Bg,
+            Some("jobs") => Builtin::Jobs,
+            Some("exit") => Builtin::Exit,
+            Some(_) => Builtin::NonBuiltin(input),
+            None => Builtin::Noop,
         }
     }
 }
