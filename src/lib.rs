@@ -4,7 +4,7 @@ use std::{
     env,
     io::{self, Write},
     path::PathBuf,
-    process::exit,
+    process::{Command, exit},
 };
 
 /// Any string can be parsed into one of these variants.
@@ -77,9 +77,36 @@ impl App {
             Builtin::Noop => {}
             Builtin::NonBuiltin(s) => match game::parse(s) {
                 Ok(()) => {}
-                Err(()) => println!("NonBuiltining"),
+                Err(()) => Self::run_command(s),
             },
         }
+    }
+
+    fn run_command(s: &str) {
+        let words: Vec<&str> = s.split_whitespace().collect();
+        let (command, args) = (words[0], words.get(1..).unwrap_or(&[]));
+
+        // cd is supposed to be a shell builtin. it breaks on windows when we feed it
+        // to Command.
+        // TODO: implement this more formally.
+        if command == "cd" {
+            match args.len() {
+                0 => {
+                    println!("cd with 0 args unimplemented");
+                }
+                1 => {}
+                _ => {
+                    println!("cd with more than one arg unimplemented");
+                }
+            };
+            env::set_current_dir(args[0]).unwrap_or_else(|_| println!("cd errored"));
+            return;
+        }
+
+        Command::new(command)
+            .args(args)
+            .status()
+            .expect("command failed to start");
     }
 
     /// Parses a command line input into a `Command`.

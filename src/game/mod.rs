@@ -23,6 +23,6 @@ pub fn check_setup() {
 }
 
 pub fn parse(s: &str) -> Result<(), ()> {
-    println!("tested");
-    Ok(())
+    // TODO: parse string for game code
+    Err(())
 }
