@@ -15,7 +15,7 @@ use std::{
 ///
 /// These include the builtin commands for the shell, and a catch-all
 /// NonBuiltin variant that contains the string.
-enum Builtin<'a> {
+enum Executable<'a> {
     /// ls can be called with no args or one arg pointing to the directory to examine.
     Ls(Option<&'a str>),
     /// cd can be called with no args or one arg pointing to the directory to change to.
@@ -32,7 +32,7 @@ enum Builtin<'a> {
 }
 
 struct CommandData<'a> {
-    command: Builtin<'a>,
+    command: Executable<'a>,
     infile: Option<&'a str>,
     outfile: Option<&'a str>,
     state: State,
@@ -41,18 +41,18 @@ struct CommandData<'a> {
 impl<'a> CommandData<'a> {
     fn eval(self) {
         match self.command {
-            Builtin::Ls(file) => {
+            Executable::Ls(file) => {
                 if let Err(error) = Self::ls(file) {
                     println!("ls errored: {error}")
                 }
             }
-            Builtin::Cd(dest) => Self::cd(dest),
-            Builtin::Exit => exit(0),
-            Builtin::Jobs => println!("Jobsing"),
-            Builtin::Bg => println!("Bging"),
-            Builtin::Fg => println!("Fging"),
-            Builtin::Noop => {}
-            Builtin::NonBuiltin { command, args } => Self::run_command(command, args),
+            Executable::Cd(dest) => Self::cd(dest),
+            Executable::Exit => exit(0),
+            Executable::Jobs => println!("Jobsing"),
+            Executable::Bg => println!("Bging"),
+            Executable::Fg => println!("Fging"),
+            Executable::Noop => {}
+            Executable::NonBuiltin { command, args } => Self::run_command(command, args),
         }
     }
 
@@ -189,7 +189,7 @@ impl App {
         // if empty then return no op
         if input.len() == 0 {
             return CommandData {
-                command: Builtin::Noop,
+                command: Executable::Noop,
                 infile,
                 outfile,
                 state,
@@ -202,24 +202,24 @@ impl App {
             "ls" => {
                 if input.len() > 1 {
                     println!("ls: too many arguments");
-                    Builtin::Noop
+                    Executable::Noop
                 } else {
-                    Builtin::Ls(input.get(0).map(|v| *v))
+                    Executable::Ls(input.get(0).map(|v| *v))
                 }
             }
             "cd" => {
                 if input.len() > 1 {
                     println!("cd: too many arguments");
-                    Builtin::Noop
+                    Executable::Noop
                 } else {
-                    Builtin::Cd(input.get(0).map(|v| *v))
+                    Executable::Cd(input.get(0).map(|v| *v))
                 }
             }
-            "fg" => Builtin::Fg,
-            "bg" => Builtin::Bg,
-            "jobs" => Builtin::Jobs,
-            "exit" => Builtin::Exit,
-            x => Builtin::NonBuiltin {
+            "fg" => Executable::Fg,
+            "bg" => Executable::Bg,
+            "jobs" => Executable::Jobs,
+            "exit" => Executable::Exit,
+            x => Executable::NonBuiltin {
                 command: x,
                 args: input,
             },
