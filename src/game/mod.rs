@@ -21,8 +21,3 @@ fn get_data_path() -> PathBuf {
 pub fn check_setup() {
     let f = fs::read_to_string(get_data_path());
 }
-
-pub fn parse(s: &str) -> Result<(), ()> {
-    // TODO: parse string for game code
-    Err(())
-}
