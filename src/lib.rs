@@ -270,69 +270,7 @@ impl App {
         // extract command
 
         let command = match input.remove(0) {
-            "ls" => {
-                let mut arg_list: Vec<String> = Vec::new();
-                input.retain(|word| {
-                    // input was split by whitespace, guaranteeing that word is nonzero length
-                    let starts_with_dash = word.chars().nth(0).unwrap() == '-';
-                    if starts_with_dash && word.len() > 1 {
-                        if word.chars().nth(1).unwrap() == '-' {
-                            // move --long-args to arg_list
-                            arg_list.push(word.to_string());
-                        } else {
-                            // move -args to arg_list as -a -r -g -s
-                            arg_list.append(
-                                &mut word[1..]
-                                    .chars()
-                                    .map(|c| {
-                                        let mut arg = String::from("-");
-                                        arg.push(c);
-                                        arg
-                                    })
-                                    .collect(),
-                            );
-                        }
-                        return false;
-                    }
-                    true // keep `-` in FILES to ls through for gnu corelib parity. `-` is a valid dir after all.
-                    // TODO: testcase about it. also, pull this whole parsing code out into a module.
-                });
-
-                let mut old_arg_list_len;
-                let args = LsArgs {
-                    all: {
-                        old_arg_list_len = arg_list.len();
-                        arg_list.retain(|word| !(*word == "-a" || *word == "--all"));
-                        old_arg_list_len > arg_list.len()
-                    },
-                    long: {
-                        old_arg_list_len = arg_list.len();
-                        arg_list.retain(|word| !(*word == "-l"));
-                        old_arg_list_len > arg_list.len()
-                    },
-                    reverse: {
-                        old_arg_list_len = arg_list.len();
-                        arg_list.retain(|word| !(*word == "-r" || *word == "--reverse"));
-                        old_arg_list_len > arg_list.len()
-                    },
-                    sort_time: {
-                        old_arg_list_len = arg_list.len();
-                        arg_list.retain(|word| !(*word == "-t"));
-                        old_arg_list_len > arg_list.len()
-                    },
-                    files: input,
-                };
-
-                if !arg_list.is_empty() {
-                    println!(
-                        "ls: could not recognize these arguments: {}",
-                        arg_list.join(" ")
-                    );
-                    Executable::Noop
-                } else {
-                    Executable::Ls(args)
-                }
-            }
+            "ls" => Self::parse_ls(input),
             "cd" => {
                 if input.len() > 1 {
                     println!("cd: too many arguments");
@@ -356,6 +294,70 @@ impl App {
             infile,
             outfile,
             state,
+        }
+    }
+
+    fn parse_ls<'a>(mut input: Vec<&'a str>) -> Executable<'a> {
+        let mut arg_list: Vec<String> = Vec::new();
+        input.retain(|word| {
+            // input was split by whitespace, guaranteeing that word is nonzero length
+            let starts_with_dash = word.chars().nth(0).unwrap() == '-';
+            if starts_with_dash && word.len() > 1 {
+                if word.chars().nth(1).unwrap() == '-' {
+                    // move --long-args to arg_list
+                    arg_list.push(word.to_string());
+                } else {
+                    // move -args to arg_list as -a -r -g -s
+                    arg_list.append(
+                        &mut word[1..]
+                            .chars()
+                            .map(|c| {
+                                let mut arg = String::from("-");
+                                arg.push(c);
+                                arg
+                            })
+                            .collect(),
+                    );
+                }
+                return false;
+            }
+            true // keep `-` in FILES to ls through for gnu corelib parity. `-` is a valid dir after all.
+            // TODO: testcase about it. also, pull this whole parsing code out into a module.
+        });
+
+        let mut old_arg_list_len;
+        let args = LsArgs {
+            all: {
+                old_arg_list_len = arg_list.len();
+                arg_list.retain(|word| !(*word == "-a" || *word == "--all"));
+                old_arg_list_len > arg_list.len()
+            },
+            long: {
+                old_arg_list_len = arg_list.len();
+                arg_list.retain(|word| !(*word == "-l"));
+                old_arg_list_len > arg_list.len()
+            },
+            reverse: {
+                old_arg_list_len = arg_list.len();
+                arg_list.retain(|word| !(*word == "-r" || *word == "--reverse"));
+                old_arg_list_len > arg_list.len()
+            },
+            sort_time: {
+                old_arg_list_len = arg_list.len();
+                arg_list.retain(|word| !(*word == "-t"));
+                old_arg_list_len > arg_list.len()
+            },
+            files: input,
+        };
+
+        if !arg_list.is_empty() {
+            println!(
+                "ls: could not recognize these arguments: {}",
+                arg_list.join(" ")
+            );
+            Executable::Noop
+        } else {
+            Executable::Ls(args)
         }
     }
 }
