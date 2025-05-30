@@ -25,21 +25,22 @@ enum Builtin<'a> {
     Bg,
     Fg,
     Noop,
-    NonBuiltin,
+    NonBuiltin{
+        command: &'a str,
+        args: Vec<&'a str>
+    },
 }
 
 struct CommandData<'a> {
-    command: &'a str,
-    args: Vec<&'a str>,
+    command: Builtin<'a>,
     infile: Option<&'a str>,
     outfile: Option<&'a str>,
-    command_type: Builtin,
     state: State,
 }
 
-impl<'a> Builtin<'a> {
+impl<'a> CommandData<'a> {
     fn eval(self) {
-        match self {
+        match self.command {
             Builtin::Ls(file) => {
                 if let Err(error) = Self::ls(file) {
                     println!("ls errored: {error}")
@@ -51,7 +52,7 @@ impl<'a> Builtin<'a> {
             Builtin::Bg => println!("Bging"),
             Builtin::Fg => println!("Fging"),
             Builtin::Noop => {}
-            Builtin::NonBuiltin(s) => Self::run_command(s),
+            Builtin::NonBuiltin{command, args} => Self::run_command(command, args),
         }
     }
 
@@ -103,9 +104,7 @@ impl<'a> Builtin<'a> {
         env::set_current_dir(dest).unwrap_or_else(|error| println!("cd errored: {error}"));
     }
 
-    fn run_command(s: &str) {
-        let words: Vec<&str> = s.split_whitespace().collect();
-        let (command, args) = (words[0], words.get(1..).unwrap_or(&[]));
+    fn run_command(command: &str, args: Vec<&str>) {
 
         if let Err(error) = Command::new(command).args(args).status() {
             println!("{command} errored: {error}")
@@ -151,59 +150,7 @@ impl App {
         }
     }
 
-    /// Parses the input and matches on it. If the input is a builtin, we do the
-    /// corresponding operation. If we could not recognize a builtin, we pass it
-    /// to the rlsh game's parser. Finally, if that returns an error, pass the
-    /// string to execve (or whatever the command is).
-    fn eval(input: &str) {
-        let command = Self::parse(input);
-        match command.command_type {
-            Builtin::Exit => exit(0),
-            Builtin::Jobs => println!("Jobsing"),
-            Builtin::Bg => println!("Bging"),
-            Builtin::Fg => println!("Fging"),
-            Builtin::Noop => {}
-            Builtin::NonBuiltin => match game::parse(command.command) {
-                Ok(()) => {}
-                Err(()) => Self::run_command(command),
-            },
-        }
-    }
-
-    fn run_command(command: CommandData) {
-        // cd is supposed to be a shell builtin. it breaks on windows when we feed it
-        // to Command.
-        // TODO: implement this more formally.
-        dbg!(command.state);
-        dbg!(command.infile);
-        dbg!(command.outfile);
-        dbg!(command.command);
-        dbg!(command.args.clone());
-        if command.command == "cd" {
-            match command.args.len() {
-                0 => {
-                    println!("cd with 0 args unimplemented");
-                    return;
-                }
-                1 => {}
-                _ => {
-                    println!("cd with more than one arg unimplemented");
-                    return;
-                }
-            };
-            env::set_current_dir(command.args[0]).unwrap_or_else(|_| println!("cd errored"));
-            return;
-        }
-
-        match Command::new(command.command).args(command.args).status() {
-            Ok(_) => (),
-            Err(error) => match error.kind() {
-                ErrorKind::NotFound => println!("{} not found.", command.command),
-                _ => println!("unknown error."), // uhhh. todo.
-            },
-        };
-    }
-
+    
     /// Parses a command line input into a `Command`.
     ///
     /// Note that we match for builtins on the first word.
@@ -244,59 +191,47 @@ impl App {
         // if empty then return no op
         if input.len() == 0 {
             return CommandData {
-                command: &"",
-                args: vec![],
+                command: Builtin::Noop,
                 infile,
                 outfile,
-                command_type: Builtin::Noop,
                 state,
             };
         }
 
         // extract command
-        let command = input.remove(0);
 
-        let command_type = match command {
+        let command = match input.remove(0) {
+            "ls" => {
+                if input.len() > 1 {
+                    println!("ls: too many arguments");
+                    Builtin::Noop
+                } else {
+                    Builtin::Ls(input.get(0).map(|v| *v))
+                }
+            },
+            "cd" => {
+                if input.len() > 1 {
+                    println!("cd: too many arguments");
+                    Builtin::Noop
+                } else {
+                    Builtin::Cd(input.get(0).map(|v| *v))
+                }
+            }
             "fg" => Builtin::Fg,
             "bg" => Builtin::Bg,
             "jobs" => Builtin::Jobs,
             "exit" => Builtin::Exit,
-            _ => Builtin::NonBuiltin,
+            x => Builtin::NonBuiltin{
+                command: x,
+                args: input,
+            },
         };
 
         CommandData {
             command,
-            args: input,
             infile,
             outfile,
-            command_type,
             state,
-        }
-    }
-
-    fn parse(input: &str) -> Builtin {
-        let words: Vec<&str> = input.split_whitespace().collect();
-        match words.get(0) {
-            Some(&"ls") => {
-                if words.len() > 2 {
-                    println!("ls: too many arguments");
-                    return Builtin::Noop;
-                }
-                Builtin::Ls(words.get(1).map(|v| *v))
-            }
-            Some(&"cd") => {
-                if words.len() > 2 {
-                    println!("cd: too many arguments");
-                    return Builtin::Noop;
-                }
-                Builtin::Cd(words.get(1).map(|v| *v))
-            }
-            Some(&"fg") => Builtin::Fg,
-            Some(&"bg") => Builtin::Bg,
-            Some(&"jobs") => Builtin::Jobs,
-            Some(&"exit") => Builtin::Exit,
-            Some(_) => Builtin::NonBuiltin(input),
-            None => Builtin::Noop,
         }
     }
 }
