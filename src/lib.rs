@@ -25,9 +25,9 @@ enum Builtin<'a> {
     Bg,
     Fg,
     Noop,
-    NonBuiltin{
+    NonBuiltin {
         command: &'a str,
-        args: Vec<&'a str>
+        args: Vec<&'a str>,
     },
 }
 
@@ -52,7 +52,7 @@ impl<'a> CommandData<'a> {
             Builtin::Bg => println!("Bging"),
             Builtin::Fg => println!("Fging"),
             Builtin::Noop => {}
-            Builtin::NonBuiltin{command, args} => Self::run_command(command, args),
+            Builtin::NonBuiltin { command, args } => Self::run_command(command, args),
         }
     }
 
@@ -105,7 +105,6 @@ impl<'a> CommandData<'a> {
     }
 
     fn run_command(command: &str, args: Vec<&str>) {
-
         if let Err(error) = Command::new(command).args(args).status() {
             println!("{command} errored: {error}")
         }
@@ -150,7 +149,6 @@ impl App {
         }
     }
 
-    
     /// Parses a command line input into a `Command`.
     ///
     /// Note that we match for builtins on the first word.
@@ -208,7 +206,7 @@ impl App {
                 } else {
                     Builtin::Ls(input.get(0).map(|v| *v))
                 }
-            },
+            }
             "cd" => {
                 if input.len() > 1 {
                     println!("cd: too many arguments");
@@ -221,7 +219,7 @@ impl App {
             "bg" => Builtin::Bg,
             "jobs" => Builtin::Jobs,
             "exit" => Builtin::Exit,
-            x => Builtin::NonBuiltin{
+            x => Builtin::NonBuiltin {
                 command: x,
                 args: input,
             },
