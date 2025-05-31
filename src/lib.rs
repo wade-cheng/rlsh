@@ -4,10 +4,19 @@ mod job_list;
 use job_list::{JobList, State};
 
 use std::{
-    env, fs::{self, DirEntry}, io::{self, Error, Write}, path::PathBuf, process::{Stdio}, time::SystemTime
+    env,
+    fs::{self, DirEntry},
+    io::{self, Error, Write},
+    path::PathBuf,
+    process::Stdio,
+    time::SystemTime,
 };
 
-use tokio::{sync::broadcast::{self, Receiver}, task, process::Command};
+use tokio::{
+    process::Command,
+    sync::broadcast::{self, Receiver},
+    task,
+};
 
 /// Any string can be parsed into one of these variants.
 ///
@@ -87,7 +96,9 @@ impl CommandData {
             },
             Executable::Exit => return false,
             Executable::Noop => {}
-            Executable::NonBuiltin { command, args } => self.run_command(job_list.clone(), reciever).await,
+            Executable::NonBuiltin { command, args } => {
+                self.run_command(job_list.clone(), reciever).await
+            }
         };
 
         return true;
@@ -194,44 +205,50 @@ impl CommandData {
 
     async fn run_command(self, job_list: JobList, mut reciever: Receiver<()>) {
         if let Executable::NonBuiltin { command, args } = self.command {
-            match Command::new(&command).args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn() {
+            match Command::new(&command)
+                .args(args)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+            {
                 Err(error) => println!("{command} errored: {error}"),
                 Ok(mut child) => {
                     let pid = child.id().unwrap_or(0);
                     match job_list.add(pid, self.state, self.cmdline) {
                         Ok(jid) => {
-                        if let State::FG = self.state {
-                            child.wait().await.expect("Error waiting for child");
-                            if !job_list.delete(jid) {
-                                eprintln!("Failed to remove job");
-                            }
-                        } else {
-                            let cmdline = job_list.get_cmdline(jid).unwrap_or(String::new());
-                            task::spawn(async move {
-                                print!("[{jid}] ({pid}) {}", cmdline);
-
-                                tokio::select! {
-                                    _ = child.wait() => {}
-                                    _ = reciever.recv() => {
-                                        child.kill().await.expect("Error killing child");
-                                        child.wait().await.expect("Error waiting for child");
-                                    }
-                                };
-
+                            if let State::FG = self.state {
+                                child.wait().await.expect("Error waiting for child");
                                 if !job_list.delete(jid) {
                                     eprintln!("Failed to remove job");
                                 }
-                                println!("\nJob [{jid}] ({pid}) terminated");
-                            });
+                            } else {
+                                let cmdline = job_list.get_cmdline(jid).unwrap_or(String::new());
+                                task::spawn(async move {
+                                    print!("[{jid}] ({pid}) {}", cmdline);
+
+                                    tokio::select! {
+                                        _ = child.wait() => {}
+                                        _ = reciever.recv() => {
+                                            child.kill().await.expect("Error killing child");
+                                            child.wait().await.expect("Error waiting for child");
+                                        }
+                                    };
+
+                                    if !job_list.delete(jid) {
+                                        eprintln!("Failed to remove job");
+                                    }
+                                    println!("\nJob [{jid}] ({pid}) terminated");
+                                });
+                            }
+                        }
+                        Err(error) => {
+                            eprintln!("{error}");
+                            child.kill().await.expect("Error killing child");
+                            child.wait().await.expect("Error waiting for child");
                         }
                     }
-                        Err(error) => {
-                        eprintln!("{error}");
-                        child.kill().await.expect("Error killing child");
-                        child.wait().await.expect("Error waiting for child");
-                    }
-                    }
-                },
+                }
             };
         }
     }
