@@ -4,10 +4,11 @@ mod job_list;
 use job_list::State;
 
 use std::{
+    collections::HashSet,
     env,
     fs::{self, DirEntry},
     io::{self, Error, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Command, exit},
     time::SystemTime,
 };
@@ -26,6 +27,8 @@ enum Executable<'a> {
     Bg,
     Fg,
     Noop,
+    TempDebugSpawnEnemy(String),
+    TempDebugAttackEnemy(String),
     NonBuiltin {
         command: &'a str,
         args: Vec<&'a str>,
@@ -63,6 +66,20 @@ struct CommandData<'a> {
 impl<'a> CommandData<'a> {
     fn eval(self) {
         match self.command {
+            Executable::TempDebugSpawnEnemy(s) => game::spawn(
+                game::Entity {
+                    components: Vec::from([
+                        game::Component::Enemy,
+                        game::Component::TakesDamage(5),
+                    ]),
+                },
+                s,
+            ),
+            Executable::TempDebugAttackEnemy(s) => {
+                if let Err(_) = game::attack(&s) {
+                    println!("could not attack {s}??? weirdo...");
+                }
+            }
             Executable::Ls(args) => {
                 if let Err(error) = Self::ls(args) {
                     println!("ls errored: {error}")
@@ -136,9 +153,11 @@ impl<'a> CommandData<'a> {
                 }
 
                 let (prefix, suffix) = if file.file_type().unwrap().is_dir() {
-                    ("\x1b[1;34m", "\x1b[0m") // 1: bold text; 34: blue foreground; 0: reset
+                    ("\x1b[1;34m".to_string(), "\x1b[0m") // 1: bold text; 34: blue foreground; 0: reset
+                } else if let Ok(_) = game::get_entity(file.path()) {
+                    ("\x1b[31m".to_string() + game::PERSON_ICON + " ", "\x1b[0m") // 31: red foreground; 0: reset
                 } else {
-                    ("", "")
+                    ("".to_string(), "")
                 };
                 print!(
                     "{}{}{}",
@@ -212,6 +231,7 @@ impl App {
                 Ok(_) => {
                     let command = Self::parse(&input_buffer);
                     command.eval();
+                    println!();
                 }
                 Err(_) => panic!(),
             }
@@ -228,6 +248,26 @@ impl App {
 
     fn parse(input: &str) -> CommandData {
         let mut input: Vec<&str> = input.split_whitespace().collect();
+        if let Some(&"spawn") = input.get(0) {
+            return CommandData {
+                command: Executable::TempDebugSpawnEnemy(String::from(
+                    input.get(1..).unwrap_or(&["goblin"]).join(" "),
+                )),
+                infile: None,
+                outfile: None,
+                state: State::FG,
+            };
+        }
+        if let Some(&"attack") = input.get(0) {
+            return CommandData {
+                command: Executable::TempDebugAttackEnemy(String::from(
+                    input.get(1..).unwrap_or(&["goblin"]).join(" "),
+                )),
+                infile: None,
+                outfile: None,
+                state: State::FG,
+            };
+        }
 
         // first check if this is a foreground or background job
         let last_word = input.last();
