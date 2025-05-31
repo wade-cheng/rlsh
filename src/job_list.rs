@@ -20,24 +20,23 @@ impl Display for State {
     }
 }
 
-#[derive(Clone, Copy)]
-pub struct Job<'a> {
-    pid: usize,
+pub struct Job {
+    pid: u32,
     state: State,
-    cmdline: &'a str,
+    cmdline: String,
 }
 
-struct JobData<'a> {
-    jobs: HashMap<usize, Job<'a>>,
+struct JobData {
+    jobs: HashMap<usize, Job>,
     fg_job: Option<usize>,
     max_jid: Option<usize>,
 }
 
 // List to manage jobs
 #[derive(Clone)]
-pub struct JobList<'a>(Arc<Mutex<JobData<'a>>>);
+pub struct JobList(Arc<Mutex<JobData>>);
 
-impl<'a> JobList<'a> {
+impl JobList {
     // Creates a new empty job list
     pub fn new() -> Self {
         JobList(Arc::new(Mutex::new(JobData {
@@ -47,18 +46,8 @@ impl<'a> JobList<'a> {
         })))
     }
 
-    // Gets the job with the assiciated jid
-    pub fn get(&self, jid: usize) -> Option<Job> {
-        let JobList(arc) = self;
-        let job_list = arc.lock().unwrap();
-        match job_list.jobs.get(&jid) {
-            Some(job) => Some(*job),
-            None => None,
-        }
-    }
-
     // Adds a new value to the job list with the following pid, state, and cmdline and returns its jid
-    pub fn add(&self, pid: usize, state: State, cmdline: &'a str) -> Result<usize, String> {
+    pub fn add(&self, pid: u32, state: State, cmdline: String) -> Result<usize, &'static str> {
         let JobList(arc) = self;
         let mut job_list = arc.lock().unwrap();
 
@@ -71,9 +60,7 @@ impl<'a> JobList<'a> {
         // Update foreground
         if let State::FG = state {
             if let Some(_) = job_list.fg_job {
-                return Err(
-                    "Can't add a foreground job if a foreground job already exists".to_string(),
-                );
+                return Err("Can't add a foreground job if a foreground job already exists");
             } else {
                 job_list.fg_job = Some(jid)
             }
@@ -91,7 +78,7 @@ impl<'a> JobList<'a> {
 
         // throw error if insert triggers an override
         if let Some(_) = job_list.jobs.insert(jid, job) {
-            return Err("Inserted job with duplicate jid".to_string());
+            return Err("Inserted job with duplicate jid");
         }
 
         Ok(jid)
@@ -134,7 +121,7 @@ impl<'a> JobList<'a> {
     }
 
     // Returns the jid associated with any pid in the job list
-    pub fn pid_to_jid(&self, pid: usize) -> Option<usize> {
+    pub fn pid_to_jid(&self, pid: u32) -> Option<usize> {
         let JobList(arc) = self;
         let job_list = arc.lock().unwrap();
 
@@ -144,7 +131,10 @@ impl<'a> JobList<'a> {
 
     // Returns the state of any one job
     pub fn get_state(&self, jid: usize) -> Option<State> {
-        let job = self.get(jid)?;
+        let JobList(arc) = self;
+        let job_list = arc.lock().unwrap();
+
+        let job = job_list.jobs.get(&jid)?;
         Some(job.state)
     }
 
@@ -188,15 +178,21 @@ impl<'a> JobList<'a> {
     }
 
     // gets the pid associated by a pid
-    pub fn get_pid(&self, jid: usize) -> Option<usize> {
-        let job = self.get(jid)?;
+    pub fn get_pid(&self, jid: usize) -> Option<u32> {
+        let JobList(arc) = self;
+        let job_list = arc.lock().unwrap();
+
+        let job = job_list.jobs.get(&jid)?;
         Some(job.pid)
     }
 
     // Gets the cmdline of a job
-    pub fn get_cmdline(&self, jid: usize) -> Option<&str> {
-        let job = self.get(jid)?;
-        Some(job.cmdline)
+    pub fn get_cmdline(&self, jid: usize) -> Option<String> {
+        let JobList(arc) = self;
+        let job_list = arc.lock().unwrap();
+
+        let job = job_list.jobs.get(&jid)?;
+        Some(job.cmdline.clone())
     }
 
     // prints out the job list to the file specified by outfile or stdout if it is None
@@ -239,69 +235,69 @@ mod tests {
     #[test]
     fn adding_jobs() {
         let list = JobList::new();
-        let result = list.add(1, State::FG, "one");
+        let result = list.add(1, State::FG, "one".to_string());
         assert_eq!(Ok(0), result);
-        let result = list.add(2, State::BG, "two");
+        let result = list.add(2, State::BG, "two".to_string());
         assert_eq!(Ok(1), result);
-        let result = list.add(3, State::FG, "three");
+        let result = list.add(3, State::FG, "three".to_string());
         assert_eq!(
-            Err("Can't add a foreground job if a foreground job already exists".to_string()),
+            Err("Can't add a foreground job if a foreground job already exists"),
             result
         );
-        let result = list.add(3, State::BG, "three");
+        let result = list.add(3, State::BG, "three".to_string());
         assert_eq!(Ok(2), result);
     }
 
     #[test]
     fn get_jobs() {
         let list = JobList::new();
-        list.add(1, State::FG, "one").unwrap();
-        list.add(2, State::BG, "two").unwrap();
-        list.add(3, State::BG, "three").unwrap();
+        list.add(1, State::FG, "one".to_string()).unwrap();
+        list.add(2, State::BG, "two".to_string()).unwrap();
+        list.add(3, State::BG, "three".to_string()).unwrap();
         assert_eq!(Some(1), list.get_pid(0));
         assert_eq!(Some(State::FG), list.get_state(0));
-        assert_eq!(Some("one"), list.get_cmdline(0));
+        assert_eq!(Some("one".to_string()), list.get_cmdline(0));
         assert_eq!(Some(2), list.get_pid(1));
         assert_eq!(Some(State::BG), list.get_state(1));
-        assert_eq!(Some("two"), list.get_cmdline(1));
+        assert_eq!(Some("two".to_string()), list.get_cmdline(1));
         assert_eq!(Some(3), list.get_pid(2));
         assert_eq!(Some(State::BG), list.get_state(2));
-        assert_eq!(Some("three"), list.get_cmdline(2));
+        assert_eq!(Some("three".to_string()), list.get_cmdline(2));
         assert_eq!(None, list.get_pid(3));
     }
 
     #[test]
     fn delete_jobs() {
         let list = JobList::new();
-        list.add(1, State::FG, "one").unwrap();
-        list.add(2, State::BG, "two").unwrap();
-        list.add(3, State::BG, "three").unwrap();
+        list.add(1, State::FG, "one".to_string()).unwrap();
+        list.add(2, State::BG, "two".to_string()).unwrap();
+        list.add(3, State::BG, "three".to_string()).unwrap();
         assert_eq!(false, list.delete(3));
         assert_eq!(true, list.delete(1));
         assert_eq!(None, list.get_pid(1));
-        assert_eq!(Ok(3), list.add(4, State::BG, "four"));
+        assert_eq!(Ok(3), list.add(4, State::BG, "four".to_string()));
         assert_eq!(true, list.delete(3));
         assert_eq!(None, list.get_pid(3));
         assert_eq!(true, list.delete(2));
         assert_eq!(None, list.get_pid(2));
-        assert_eq!(Ok(1), list.add(5, State::BG, "four"));
+        assert_eq!(Ok(1), list.add(5, State::BG, "four".to_string()));
     }
 
     #[test]
     fn fg_jobs() {
         let list = JobList::new();
-        list.add(1, State::BG, "one").unwrap();
+        list.add(1, State::BG, "one".to_string()).unwrap();
         assert_eq!(None, list.fg_job());
-        list.add(2, State::FG, "two").unwrap();
+        list.add(2, State::FG, "two".to_string()).unwrap();
         assert_eq!(Some(1), list.fg_job());
     }
 
     #[test]
     fn pid_to_jid_test() {
         let list = JobList::new();
-        list.add(1, State::FG, "one").unwrap();
-        list.add(2, State::BG, "two").unwrap();
-        list.add(3, State::BG, "three").unwrap();
+        list.add(1, State::FG, "one".to_string()).unwrap();
+        list.add(2, State::BG, "two".to_string()).unwrap();
+        list.add(3, State::BG, "three".to_string()).unwrap();
         assert_eq!(None, list.pid_to_jid(0));
         assert_eq!(Some(0), list.pid_to_jid(1));
         assert_eq!(Some(1), list.pid_to_jid(2));
@@ -311,12 +307,12 @@ mod tests {
     #[test]
     fn state_sets() {
         let list = JobList::new();
-        list.add(1, State::FG, "one").unwrap();
+        list.add(1, State::FG, "one".to_string()).unwrap();
         assert_eq!(true, list.set_state(0, State::BG));
         assert_eq!(Some(State::BG), list.get_state(0));
         assert_eq!(true, list.set_state(0, State::FG));
         assert_eq!(Some(State::FG), list.get_state(0));
-        list.add(2, State::BG, "two").unwrap();
+        list.add(2, State::BG, "two".to_string()).unwrap();
         assert_eq!(false, list.set_state(1, State::FG));
         assert_eq!(Some(State::BG), list.get_state(1));
         assert_eq!(true, list.set_state(0, State::BG));

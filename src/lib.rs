@@ -4,6 +4,7 @@ mod job_list;
 use job_list::{JobList, State};
 
 use std::{
+    any::Any,
     env,
     fs::{self, DirEntry},
     io::{self, Error, Write},
@@ -36,7 +37,7 @@ enum Executable {
 
 /// We attempt to mimic the GNU coreutils args as much as possible. This helps
 /// users with familiarity with the terminal.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct LsArgs {
     /// The files to list information from. Will default to the current working
     /// directory if `files.len() == 0`.
@@ -60,29 +61,12 @@ struct CommandData {
     infile: Option<String>,
     outfile: Option<String>,
     state: State,
+    cmdline: String,
 }
 
 impl CommandData {
     fn eval(self, job_list: &JobList) -> bool {
-        if let Executable::Exit = self.command {
-            return false;
-        } else {
-            if let State::FG = self.state {
-                self.run(job_list);
-            } else {
-                task::spawn(self.run_backgroun());
-            }
-        }
-
-        return true;
-    }
-
-    async fn run_backgroun(self) {
-        ()
-    }
-
-    fn run(self, job_list: &JobList) {
-        match self.command {
+        match &self.command {
             Executable::TempDebugSpawnEnemy(s) => game::spawn(
                 game::Entity {
                     components: Vec::from([
@@ -98,7 +82,7 @@ impl CommandData {
                 }
             }
             Executable::Ls(args) => {
-                if let Err(error) = Self::ls(args) {
+                if let Err(error) = Self::ls(args.clone()) {
                     println!("ls errored: {error}")
                 }
             }
@@ -107,10 +91,12 @@ impl CommandData {
                 Ok(()) => (),
                 Err(err) => println!("Error printing jobs: {err}"),
             },
+            Executable::Exit => return false,
             Executable::Noop => {}
-            Executable::NonBuiltin { command, args } => Self::run_command(command, args),
-            Executable::Exit => panic!("Should never get here"),
+            Executable::NonBuiltin { command, args } => self.run_command(job_list.clone()),
         };
+
+        return true;
     }
 
     fn ls(mut args: LsArgs) -> Result<(), Error> {
@@ -212,9 +198,24 @@ impl CommandData {
         env::set_current_dir(dest).unwrap_or_else(|error| println!("cd errored: {error}"));
     }
 
-    fn run_command(command: String, args: Vec<String>) {
-        if let Err(error) = Command::new(&command).args(args).status() {
-            println!("{command} errored: {error}")
+    fn run_command(self, job_list: JobList) {
+        if let Executable::NonBuiltin { command, args } = self.command {
+            match Command::new(&command).args(args).spawn() {
+                Err(error) => println!("{command} errored: {error}"),
+                Ok(mut child) => match job_list.add(child.id(), self.state, self.cmdline) {
+                    Ok(jid) => {
+                        child.wait().expect("Error waiting for child");
+                        if !job_list.delete(jid) {
+                            eprintln!("Failed to remove job");
+                        }
+                    }
+                    Err(error) => {
+                        eprintln!("{error}");
+                        child.kill().expect("Error killing child");
+                        child.wait().expect("Error waiting for child");
+                    }
+                },
+            };
         }
     }
 }
@@ -268,6 +269,8 @@ impl App {
     /// but `fg___` will not.
 
     fn parse(input: &str) -> CommandData {
+        let cmdline = input.to_string();
+
         let mut input: Vec<&str> = input.split_whitespace().collect();
         if let Some(&"spawn") = input.get(0) {
             return CommandData {
@@ -277,6 +280,7 @@ impl App {
                 infile: None,
                 outfile: None,
                 state: State::FG,
+                cmdline,
             };
         }
         if let Some(&"attack") = input.get(0) {
@@ -287,6 +291,7 @@ impl App {
                 infile: None,
                 outfile: None,
                 state: State::FG,
+                cmdline,
             };
         }
 
@@ -325,6 +330,7 @@ impl App {
                 infile,
                 outfile,
                 state,
+                cmdline,
             };
         }
 
@@ -353,6 +359,7 @@ impl App {
             infile,
             outfile,
             state,
+            cmdline,
         }
     }
 
