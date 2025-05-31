@@ -61,7 +61,7 @@ struct CommandData<'a> {
 }
 
 impl<'a> CommandData<'a> {
-    fn eval(self, job_list: &JobList) {
+    fn eval(self, job_list: &JobList) -> bool {
         match self.command {
             Executable::Ls(args) => {
                 if let Err(error) = Self::ls(args) {
@@ -69,7 +69,7 @@ impl<'a> CommandData<'a> {
                 }
             }
             Executable::Cd(dest) => Self::cd(dest),
-            Executable::Exit => exit(0),
+            Executable::Exit => return false,
             Executable::Jobs => match job_list.list_jobs(self.outfile) {
                 Ok(()) => (),
                 Err(err) => println!("Error printing jobs: {err}"),
@@ -78,7 +78,9 @@ impl<'a> CommandData<'a> {
             Executable::Fg => println!("Fging"),
             Executable::Noop => {}
             Executable::NonBuiltin { command, args } => Self::run_command(command, args),
-        }
+        };
+
+        return true;
     }
 
     fn ls(mut args: LsArgs<'a>) -> Result<(), Error> {
@@ -215,7 +217,9 @@ impl App {
                 Ok(0) => return, // exit on EOF (CTRL-D)
                 Ok(_) => {
                     let command = Self::parse(&input_buffer);
-                    command.eval(&job_list);
+                    if !command.eval(&job_list) {
+                        return;
+                    }
                 }
                 Err(_) => panic!(),
             }
