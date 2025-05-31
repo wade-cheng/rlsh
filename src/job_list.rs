@@ -217,7 +217,7 @@ impl JobList {
         let job_list = arc.lock().unwrap();
 
         for (jid, job) in job_list.jobs.iter() {
-            writeln!(
+            write!(
                 writer,
                 "[{jid}] ({}) {} {}",
                 job.pid, job.state, job.cmdline

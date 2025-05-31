@@ -4,16 +4,10 @@ mod job_list;
 use job_list::{JobList, State};
 
 use std::{
-    any::Any,
-    env,
-    fs::{self, DirEntry},
-    io::{self, Error, Write},
-    path::PathBuf,
-    process::Command,
-    time::SystemTime,
+    env, fs::{self, DirEntry}, io::{self, Error, Write}, path::PathBuf, process::{Stdio}, time::SystemTime
 };
 
-use tokio::task;
+use tokio::{sync::broadcast::{self, Receiver}, task, process::Command};
 
 /// Any string can be parsed into one of these variants.
 ///
@@ -65,7 +59,7 @@ struct CommandData {
 }
 
 impl CommandData {
-    fn eval(self, job_list: &JobList) -> bool {
+    async fn eval(self, job_list: &JobList, reciever: Receiver<()>) -> bool {
         match &self.command {
             Executable::TempDebugSpawnEnemy(s) => game::spawn(
                 game::Entity {
@@ -93,7 +87,7 @@ impl CommandData {
             },
             Executable::Exit => return false,
             Executable::Noop => {}
-            Executable::NonBuiltin { command, args } => self.run_command(job_list.clone()),
+            Executable::NonBuiltin { command, args } => self.run_command(job_list.clone(), reciever).await,
         };
 
         return true;
@@ -198,21 +192,44 @@ impl CommandData {
         env::set_current_dir(dest).unwrap_or_else(|error| println!("cd errored: {error}"));
     }
 
-    fn run_command(self, job_list: JobList) {
+    async fn run_command(self, job_list: JobList, mut reciever: Receiver<()>) {
         if let Executable::NonBuiltin { command, args } = self.command {
-            match Command::new(&command).args(args).spawn() {
+            match Command::new(&command).args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn() {
                 Err(error) => println!("{command} errored: {error}"),
-                Ok(mut child) => match job_list.add(child.id(), self.state, self.cmdline) {
-                    Ok(jid) => {
-                        child.wait().expect("Error waiting for child");
-                        if !job_list.delete(jid) {
-                            eprintln!("Failed to remove job");
+                Ok(mut child) => {
+                    let pid = child.id().unwrap_or(0);
+                    match job_list.add(pid, self.state, self.cmdline) {
+                        Ok(jid) => {
+                        if let State::FG = self.state {
+                            child.wait().await.expect("Error waiting for child");
+                            if !job_list.delete(jid) {
+                                eprintln!("Failed to remove job");
+                            }
+                        } else {
+                            let cmdline = job_list.get_cmdline(jid).unwrap_or(String::new());
+                            task::spawn(async move {
+                                print!("[{jid}] ({pid}) {}", cmdline);
+
+                                tokio::select! {
+                                    _ = child.wait() => {}
+                                    _ = reciever.recv() => {
+                                        child.kill().await.expect("Error killing child");
+                                        child.wait().await.expect("Error waiting for child");
+                                    }
+                                };
+
+                                if !job_list.delete(jid) {
+                                    eprintln!("Failed to remove job");
+                                }
+                                println!("\nJob [{jid}] ({pid}) terminated");
+                            });
                         }
                     }
-                    Err(error) => {
+                        Err(error) => {
                         eprintln!("{error}");
-                        child.kill().expect("Error killing child");
-                        child.wait().expect("Error waiting for child");
+                        child.kill().await.expect("Error killing child");
+                        child.wait().await.expect("Error waiting for child");
+                    }
                     }
                 },
             };
@@ -244,6 +261,7 @@ impl App {
     pub async fn run(self) {
         let mut input_buffer = String::new();
         let job_list = JobList::new();
+        let (shutdown_tx, _) = broadcast::channel::<()>(1);
         loop {
             Self::print_prompt();
 
@@ -251,7 +269,8 @@ impl App {
                 Ok(0) => return, // exit on EOF (CTRL-D)
                 Ok(_) => {
                     let command = Self::parse(&input_buffer);
-                    if !command.eval(&job_list) {
+                    if !command.eval(&job_list, shutdown_tx.subscribe()).await {
+                        let _ = shutdown_tx.send(());
                         return;
                     }
                 }
