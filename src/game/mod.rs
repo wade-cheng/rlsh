@@ -1,14 +1,10 @@
 use std::{
-    collections::HashSet,
     env,
     fs::{self, File},
     io::Read,
     path::{Path, PathBuf},
-    str::FromStr,
-    string::ParseError,
 };
 
-use rmp_serde::{Deserializer, Serializer, encode::ExtFieldSerializer};
 use serde::{Deserialize, Serialize};
 
 pub const FILE_SIGNATURE: &[u8; 8] = b"\x00rlsh0.1";
