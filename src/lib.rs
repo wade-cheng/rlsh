@@ -24,8 +24,6 @@ enum Executable<'a> {
     Cd(Option<&'a str>),
     Exit,
     Jobs,
-    Bg,
-    Fg,
     Noop,
     TempDebugSpawnEnemy(String),
     TempDebugAttackEnemy(String),
@@ -91,8 +89,6 @@ impl<'a> CommandData<'a> {
                 Ok(()) => (),
                 Err(err) => println!("Error printing jobs: {err}"),
             },
-            Executable::Bg => println!("Bging"),
-            Executable::Fg => println!("Fging"),
             Executable::Noop => {}
             Executable::NonBuiltin { command, args } => Self::run_command(command, args),
         };
@@ -326,8 +322,6 @@ impl App {
                     Executable::Cd(input.get(0).map(|v| *v))
                 }
             }
-            "fg" => Executable::Fg,
-            "bg" => Executable::Bg,
             "jobs" => Executable::Jobs,
             "exit" => Executable::Exit,
             x => Executable::NonBuiltin {
