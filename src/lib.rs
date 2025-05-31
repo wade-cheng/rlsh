@@ -4,42 +4,43 @@ mod job_list;
 use job_list::{JobList, State};
 
 use std::{
-    collections::HashSet,
     env,
     fs::{self, DirEntry},
     io::{self, Error, Write},
-    path::{Path, PathBuf},
-    process::{Command, exit},
+    path::PathBuf,
+    process::Command,
     time::SystemTime,
 };
+
+use tokio::task;
 
 /// Any string can be parsed into one of these variants.
 ///
 /// These include the builtin commands for the shell, and a catch-all
 /// NonBuiltin variant that contains the string.
-enum Executable<'a> {
+enum Executable {
     /// ls can be called with no args or one arg pointing to the directory to examine.
-    Ls(LsArgs<'a>),
+    Ls(LsArgs),
     /// cd can be called with no args or one arg pointing to the directory to change to.
-    Cd(Option<&'a str>),
+    Cd(Option<String>),
     Exit,
     Jobs,
     Noop,
     TempDebugSpawnEnemy(String),
     TempDebugAttackEnemy(String),
     NonBuiltin {
-        command: &'a str,
-        args: Vec<&'a str>,
+        command: String,
+        args: Vec<String>,
     },
 }
 
 /// We attempt to mimic the GNU coreutils args as much as possible. This helps
 /// users with familiarity with the terminal.
 #[derive(Debug)]
-struct LsArgs<'a> {
+struct LsArgs {
     /// The files to list information from. Will default to the current working
     /// directory if `files.len() == 0`.
-    files: Vec<&'a str>,
+    files: Vec<String>,
     /// `-a`, `--all`.
     /// Whether to include entires starting with `.`.
     all: bool,
@@ -54,15 +55,33 @@ struct LsArgs<'a> {
     sort_time: bool,
 }
 
-struct CommandData<'a> {
-    command: Executable<'a>,
-    infile: Option<&'a str>,
-    outfile: Option<&'a str>,
+struct CommandData {
+    command: Executable,
+    infile: Option<String>,
+    outfile: Option<String>,
     state: State,
 }
 
-impl<'a> CommandData<'a> {
+impl CommandData {
     fn eval(self, job_list: &JobList) -> bool {
+        if let Executable::Exit = self.command {
+            return false;
+        } else {
+            if let State::FG = self.state {
+                self.run(job_list);
+            } else {
+                task::spawn(self.run_backgroun());
+            }
+        }
+
+        return true;
+    }
+
+    async fn run_backgroun(self) {
+        ()
+    }
+
+    fn run(self, job_list: &JobList) {
         match self.command {
             Executable::TempDebugSpawnEnemy(s) => game::spawn(
                 game::Entity {
@@ -83,24 +102,22 @@ impl<'a> CommandData<'a> {
                     println!("ls errored: {error}")
                 }
             }
-            Executable::Cd(dest) => Self::cd(dest),
-            Executable::Exit => return false,
+            Executable::Cd(dest) => Self::cd(&dest),
             Executable::Jobs => match job_list.list_jobs(self.outfile) {
                 Ok(()) => (),
                 Err(err) => println!("Error printing jobs: {err}"),
             },
             Executable::Noop => {}
             Executable::NonBuiltin { command, args } => Self::run_command(command, args),
+            Executable::Exit => panic!("Should never get here"),
         };
-
-        return true;
     }
 
-    fn ls(mut args: LsArgs<'a>) -> Result<(), Error> {
+    fn ls(mut args: LsArgs) -> Result<(), Error> {
         let path = env::current_dir()?;
 
         if args.files.len() == 0 {
-            args.files.push(".");
+            args.files.push(".".to_string());
         }
 
         let dirs = args.files.iter().map(|s| {
@@ -185,18 +202,18 @@ impl<'a> CommandData<'a> {
         Ok(())
     }
 
-    fn cd(dest: Option<&str>) {
+    fn cd(dest: &Option<String>) {
         // TODO: this computes homedir every call. we only need to when dest = None
         // I'd like to avoid creating a whole string because it's unneccessary, but
         // it's hard to get a string slice without such ownership without the borrow
         // checker complaining.
         let homedir = dirs::home_dir().unwrap();
-        let dest = dest.unwrap_or(homedir.to_str().unwrap());
+        let dest = dest.as_deref().unwrap_or(homedir.to_str().unwrap());
         env::set_current_dir(dest).unwrap_or_else(|error| println!("cd errored: {error}"));
     }
 
-    fn run_command(command: &str, args: Vec<&str>) {
-        if let Err(error) = Command::new(command).args(args).status() {
+    fn run_command(command: String, args: Vec<String>) {
+        if let Err(error) = Command::new(&command).args(args).status() {
             println!("{command} errored: {error}")
         }
     }
@@ -222,7 +239,8 @@ impl App {
         io::stdout().flush().unwrap();
     }
 
-    pub fn run(self) {
+    #[tokio::main]
+    pub async fn run(self) {
         let mut input_buffer = String::new();
         let job_list = JobList::new();
         loop {
@@ -287,7 +305,7 @@ impl App {
             Some(i) => {
                 let mut new_input = input.split_off(i);
                 new_input.remove(0);
-                (input.last().map(|v| *v), new_input)
+                (input.last().map(|v| v.to_string()), new_input)
             }
             None => (None, input),
         };
@@ -295,7 +313,7 @@ impl App {
         let outfile = match input.iter().position(|x| x == &">") {
             Some(i) => {
                 let outvec = input.split_off(i);
-                outvec.get(1).map(|v| *v)
+                outvec.get(1).map(|v| v.to_string())
             }
             None => None,
         };
@@ -319,14 +337,14 @@ impl App {
                     println!("cd: too many arguments");
                     Executable::Noop
                 } else {
-                    Executable::Cd(input.get(0).map(|v| *v))
+                    Executable::Cd(input.get(0).map(|v| v.to_string()))
                 }
             }
             "jobs" => Executable::Jobs,
             "exit" => Executable::Exit,
             x => Executable::NonBuiltin {
-                command: x,
-                args: input,
+                command: x.to_string(),
+                args: input.iter().map(|v| v.to_string()).collect(),
             },
         };
 
@@ -338,7 +356,7 @@ impl App {
         }
     }
 
-    fn parse_ls<'a>(mut input: Vec<&'a str>) -> Executable<'a> {
+    fn parse_ls(mut input: Vec<&str>) -> Executable {
         let mut arg_list: Vec<String> = Vec::new();
         input.retain(|word| {
             // input was split by whitespace, guaranteeing that word is nonzero length
@@ -388,7 +406,7 @@ impl App {
                 arg_list.retain(|word| !(*word == "-t"));
                 old_arg_list_len > arg_list.len()
             },
-            files: input,
+            files: input.iter().map(|v| v.to_string()).collect(),
         };
 
         if !arg_list.is_empty() {

@@ -202,7 +202,7 @@ impl<'a> JobList<'a> {
     // prints out the job list to the file specified by outfile or stdout if it is None
     // If the file exists it is truncated before writing
     // If it does not exist it is created
-    pub fn list_jobs(&self, outfile: Option<&str>) -> io::Result<()> {
+    pub fn list_jobs(&self, outfile: Option<String>) -> io::Result<()> {
         match outfile {
             None => {
                 let stdout = io::stdout().lock();
