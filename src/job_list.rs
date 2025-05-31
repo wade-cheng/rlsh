@@ -1,11 +1,23 @@
 use std::cmp;
 use std::collections::HashMap;
+use std::fmt::{self, Display};
+use std::fs::File;
+use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum State {
     BG,
     FG,
+}
+
+impl Display for State {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::BG => write!(f, "Background"),
+            Self::FG => write!(f, "Foreground"),
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -185,6 +197,38 @@ impl<'a> JobList<'a> {
     pub fn get_cmdline(&self, jid: usize) -> Option<&str> {
         let job = self.get(jid)?;
         Some(job.cmdline)
+    }
+
+    // prints out the job list to the file specified by outfile or stdout if it is None
+    // If the file exists it is truncated before writing
+    // If it does not exist it is created
+    pub fn list_jobs(&self, outfile: Option<&str>) -> io::Result<()> {
+        match outfile {
+            None => {
+                let stdout = io::stdout().lock();
+                self.print_jobs(stdout)
+            }
+            Some(path) => {
+                let file = File::create(path)?;
+                self.print_jobs(file)
+            }
+        }
+    }
+
+    // Prints all jobs in the job list in a random order to the specified writer
+    fn print_jobs<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        let JobList(arc) = self;
+        let job_list = arc.lock().unwrap();
+
+        for (jid, job) in job_list.jobs.iter() {
+            writeln!(
+                writer,
+                "[{jid}] ({}) {} {}",
+                job.pid, job.state, job.cmdline
+            )?;
+        }
+
+        Ok(())
     }
 }
 

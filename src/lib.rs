@@ -1,7 +1,7 @@
 mod game;
 mod job_list;
 
-use job_list::State;
+use job_list::{JobList, State};
 
 use std::{
     collections::HashSet,
@@ -64,7 +64,7 @@ struct CommandData<'a> {
 }
 
 impl<'a> CommandData<'a> {
-    fn eval(self) {
+    fn eval(self, job_list: &JobList) {
         match self.command {
             Executable::TempDebugSpawnEnemy(s) => game::spawn(
                 game::Entity {
@@ -87,7 +87,10 @@ impl<'a> CommandData<'a> {
             }
             Executable::Cd(dest) => Self::cd(dest),
             Executable::Exit => exit(0),
-            Executable::Jobs => println!("Jobsing"),
+            Executable::Jobs => match job_list.list_jobs(self.outfile) {
+                Ok(()) => (),
+                Err(err) => println!("Error printing jobs: {err}"),
+            },
             Executable::Bg => println!("Bging"),
             Executable::Fg => println!("Fging"),
             Executable::Noop => {}
@@ -223,6 +226,7 @@ impl App {
 
     pub fn run(self) {
         let mut input_buffer = String::new();
+        let job_list = JobList::new();
         loop {
             Self::print_prompt();
 
@@ -230,8 +234,7 @@ impl App {
                 Ok(0) => return, // exit on EOF (CTRL-D)
                 Ok(_) => {
                     let command = Self::parse(&input_buffer);
-                    command.eval();
-                    println!();
+                    command.eval(&job_list);
                 }
                 Err(_) => panic!(),
             }
