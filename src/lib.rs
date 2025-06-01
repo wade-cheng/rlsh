@@ -14,7 +14,6 @@ use std::{
 
 use tokio::{
     process::Command,
-    sync::broadcast::{self, Receiver},
     task,
 };
 
@@ -68,7 +67,7 @@ struct CommandData {
 }
 
 impl CommandData {
-    async fn eval(self, job_list: &JobList, reciever: Receiver<()>) -> bool {
+    async fn eval(self, job_list: &JobList) -> bool {
         match &self.command {
             Executable::TempDebugSpawnEnemy(s) => game::spawn(
                 game::Entity {
@@ -96,9 +95,7 @@ impl CommandData {
             },
             Executable::Exit => return false,
             Executable::Noop => {}
-            Executable::NonBuiltin { command, args } => {
-                self.run_command(job_list.clone(), reciever).await
-            }
+            Executable::NonBuiltin { command, args } => self.run_command(job_list.clone()).await,
         };
 
         return true;
@@ -203,7 +200,7 @@ impl CommandData {
         env::set_current_dir(dest).unwrap_or_else(|error| println!("cd errored: {error}"));
     }
 
-    async fn run_command(self, job_list: JobList, mut reciever: Receiver<()>) {
+    async fn run_command(self, job_list: JobList) {
         if let Executable::NonBuiltin { command, args } = self.command {
             match Command::new(&command)
                 .args(args)
@@ -272,7 +269,6 @@ impl App {
     pub async fn run(self) {
         let mut input_buffer = String::new();
         let job_list = JobList::new();
-        let (shutdown_tx, _) = broadcast::channel::<()>(1);
         loop {
             Self::print_prompt();
 
@@ -280,8 +276,7 @@ impl App {
                 Ok(0) => return, // exit on EOF (CTRL-D)
                 Ok(_) => {
                     let command = Self::parse(&input_buffer);
-                    if !command.eval(&job_list, shutdown_tx.subscribe()).await {
-                        let _ = shutdown_tx.send(());
+                    if !command.eval(&job_list).await {
                         return;
                     }
                 }
