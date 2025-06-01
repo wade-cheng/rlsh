@@ -5,7 +5,7 @@ use job_list::{JobList, State};
 
 use std::{
     env,
-    fs::{self, DirEntry},
+    fs::{self, DirEntry, File},
     io::{self, Error, Write},
     path::PathBuf,
     process::Stdio,
@@ -20,7 +20,7 @@ use tokio::{process::Command, task};
 /// NonBuiltin variant that contains the string.
 enum Executable {
     /// ls can be called with no args or one arg pointing to the directory to examine.
-    Ls(LsArgs),
+    Ls(LsData),
     /// cd can be called with no args or one arg pointing to the directory to change to.
     Cd(Option<String>),
     Exit,
@@ -32,18 +32,26 @@ enum Executable {
 }
 
 struct NonBuiltInData {
+    // String that contains the command to pass to exec
     command: String,
+    // Vector of string arguments to pass as the arguments to exec
     args: Vec<String>,
+    // Weather this is to be run as a foreground or background job
     state: State,
+    // The exact command that was entered into the command line
     cmdline: String,
+    // An option that either contains a string to the file to replace stdin
+    // or none if stdin should be inherrited
     infile: Option<String>,
+    // An option that either contains a string to the file to replace stdout
+    // or none if stdout should be inherrited
     outfile: Option<String>,
 }
 
 /// We attempt to mimic the GNU coreutils args as much as possible. This helps
 /// users with familiarity with the terminal.
 #[derive(Debug, Clone)]
-struct LsArgs {
+struct LsData {
     /// The files to list information from. Will default to the current working
     /// directory if `files.len() == 0`.
     files: Vec<String>,
@@ -59,6 +67,9 @@ struct LsArgs {
     /// `-t`.
     /// Whether to sort by time.
     sort_time: bool,
+    // An option that either contains a string to the file to replace stdout
+    // or none if stdout should be inherrited
+    outfile: Option<String>,
 }
 
 impl Executable {
@@ -96,22 +107,27 @@ impl Executable {
         return true;
     }
 
-    fn ls(mut args: LsArgs) -> Result<(), Error> {
+    fn ls(mut data: LsData) -> Result<(), Error> {
+        let mut outfile: Box<dyn Write> = match &data.outfile {
+            Some(path) => Box::new(File::create(path)?),
+            None => Box::new(io::stdout().lock()),
+        };
+
         let path = env::current_dir()?;
 
-        if args.files.len() == 0 {
-            args.files.push(".".to_string());
+        if data.files.len() == 0 {
+            data.files.push(".".to_string());
         }
 
-        let dirs = args.files.iter().map(|s| {
+        let dirs = data.files.iter().map(|s| {
             let mut dir = path.clone();
             dir.push(s);
             dir
         });
 
         for dir in dirs {
-            if args.files.len() != 1 {
-                println!("{}:", dir.file_name().unwrap().display())
+            if data.files.len() != 1 {
+                writeln!(outfile, "{}:", dir.file_name().unwrap().display())?;
             }
 
             let entries = fs::read_dir(dir)?;
@@ -122,7 +138,7 @@ impl Executable {
             files.sort_by_key(|entry| {
                 let is_dir = !entry.file_type().unwrap().is_dir();
                 let fname = entry.file_name();
-                if args.sort_time {
+                if data.sort_time {
                     let x = entry.metadata().unwrap().modified().unwrap();
                     return (x, is_dir, fname);
                 }
@@ -132,14 +148,14 @@ impl Executable {
             // Need Box hack because `iter` and `rev` have differently typed outputs.
             // An `either` crate exists for this use case, but we can cut down on
             // crate usage.
-            let file_order: Box<dyn Iterator<Item = &DirEntry>> = if args.reverse {
+            let file_order: Box<dyn Iterator<Item = &DirEntry>> = if data.reverse {
                 Box::new(files.iter().rev())
             } else {
                 Box::new(files.iter())
             };
             for file in file_order {
                 // ignore dotfiles. NOTE: let chains would help this look nicer, but are nightly.
-                if !args.all {
+                if !data.all {
                     if let Some('.') = file
                         .path()
                         .file_name()
@@ -153,34 +169,40 @@ impl Executable {
                     }
                 }
 
-                let (prefix, suffix) = if file.file_type().unwrap().is_dir() {
-                    ("\x1b[1;34m".to_string(), "\x1b[0m") // 1: bold text; 34: blue foreground; 0: reset
-                } else if let Ok(_) = game::get_entity(file.path()) {
-                    ("\x1b[31m".to_string() + game::PERSON_ICON + " ", "\x1b[0m") // 31: red foreground; 0: reset
+                let (prefix, suffix) = if let None = data.outfile {
+                    if file.file_type().unwrap().is_dir() {
+                        ("\x1b[1;34m".to_string(), "\x1b[0m") // 1: bold text; 34: blue foreground; 0: reset
+                    } else if let Ok(_) = game::get_entity(file.path()) {
+                        ("\x1b[31m".to_string() + game::PERSON_ICON + " ", "\x1b[0m") // 31: red foreground; 0: reset
+                    } else {
+                        ("".to_string(), "")
+                    }
                 } else {
                     ("".to_string(), "")
                 };
-                print!(
+
+                write!(
+                    outfile,
                     "{}{}{}",
                     prefix,
                     file.path().file_name().unwrap().display(),
                     suffix
-                );
+                )?;
 
-                if args.long {
-                    print!("\n");
+                if data.long {
+                    write!(outfile, "\n")?;
                 } else {
-                    print!("  ");
+                    write!(outfile, "  ")?;
                 }
                 io::stdout().flush().unwrap();
             }
 
-            if args.files.len() != 1 {
-                println!("");
+            if data.files.len() != 1 {
+                writeln!(outfile, "")?;
             }
         }
 
-        println!("");
+        writeln!(outfile, "")?;
 
         Ok(())
     }
@@ -195,12 +217,48 @@ impl Executable {
         env::set_current_dir(dest).unwrap_or_else(|error| println!("cd errored: {error}"));
     }
 
+    // Runs a non built in command
     async fn run_command(data: NonBuiltInData, job_list: JobList) {
+        // Calculate the infile
+        let infile: Stdio = match data.infile {
+            Some(path) => match File::create(path) {
+                Ok(file) => file.into(),
+                Err(err) => {
+                    println!("Error opening file: {err}");
+                    return;
+                }
+            },
+            None => {
+                if let State::FG = data.state {
+                    Stdio::inherit()
+                } else {
+                    Stdio::null()
+                }
+            }
+        };
+
+        // Calculate the outfile
+        let outfile: Stdio = match data.outfile {
+            Some(path) => match File::create(path) {
+                Ok(file) => file.into(),
+                Err(err) => {
+                    println!("Error opening file: {err}");
+                    return;
+                }
+            },
+            None => {
+                if let State::FG = data.state {
+                    Stdio::inherit()
+                } else {
+                    Stdio::null()
+                }
+            }
+        };
+
         match Command::new(&data.command)
             .args(data.args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stdin(infile)
+            .stdout(outfile)
             .spawn()
         {
             Err(error) => println!("{} errored: {error}", data.command),
@@ -338,7 +396,7 @@ impl App {
         // extract command
 
         match input.remove(0) {
-            "ls" => Self::parse_ls(input),
+            "ls" => Self::parse_ls(input, outfile),
             "cd" => {
                 if input.len() > 1 {
                     println!("cd: too many arguments");
@@ -360,7 +418,7 @@ impl App {
         }
     }
 
-    fn parse_ls(mut input: Vec<&str>) -> Executable {
+    fn parse_ls(mut input: Vec<&str>, outfile: Option<String>) -> Executable {
         let mut arg_list: Vec<String> = Vec::new();
         input.retain(|word| {
             // input was split by whitespace, guaranteeing that word is nonzero length
@@ -389,7 +447,7 @@ impl App {
         });
 
         let mut old_arg_list_len;
-        let args = LsArgs {
+        let data = LsData {
             all: {
                 old_arg_list_len = arg_list.len();
                 arg_list.retain(|word| !(*word == "-a" || *word == "--all"));
@@ -411,6 +469,7 @@ impl App {
                 old_arg_list_len > arg_list.len()
             },
             files: input.iter().map(|v| v.to_string()).collect(),
+            outfile,
         };
 
         if !arg_list.is_empty() {
@@ -420,7 +479,7 @@ impl App {
             );
             Executable::Noop
         } else {
-            Executable::Ls(args)
+            Executable::Ls(data)
         }
     }
 }
