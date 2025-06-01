@@ -227,13 +227,7 @@ impl CommandData {
                                 task::spawn(async move {
                                     print!("[{jid}] ({pid}) {}", cmdline);
 
-                                    tokio::select! {
-                                        _ = child.wait() => {}
-                                        _ = reciever.recv() => {
-                                            child.kill().await.expect("Error killing child");
-                                            child.wait().await.expect("Error waiting for child");
-                                        }
-                                    };
+                                    child.wait().await.expect("Error waiting for child");
 
                                     if !job_list.delete(jid) {
                                         eprintln!("Failed to remove job");
