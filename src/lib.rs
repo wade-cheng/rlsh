@@ -12,10 +12,7 @@ use std::{
     time::SystemTime,
 };
 
-use tokio::{
-    process::Command,
-    task,
-};
+use tokio::{process::Command, task};
 
 /// Any string can be parsed into one of these variants.
 ///
@@ -27,14 +24,20 @@ enum Executable {
     /// cd can be called with no args or one arg pointing to the directory to change to.
     Cd(Option<String>),
     Exit,
-    Jobs,
+    Jobs(Option<String>),
     Noop,
     TempDebugSpawnEnemy(String),
     TempDebugAttackEnemy(String),
-    NonBuiltin {
-        command: String,
-        args: Vec<String>,
-    },
+    NonBuiltin(NonBuiltInData),
+}
+
+struct NonBuiltInData {
+    command: String,
+    args: Vec<String>,
+    state: State,
+    cmdline: String,
+    infile: Option<String>,
+    outfile: Option<String>,
 }
 
 /// We attempt to mimic the GNU coreutils args as much as possible. This helps
@@ -58,17 +61,9 @@ struct LsArgs {
     sort_time: bool,
 }
 
-struct CommandData {
-    command: Executable,
-    infile: Option<String>,
-    outfile: Option<String>,
-    state: State,
-    cmdline: String,
-}
-
-impl CommandData {
+impl Executable {
     async fn eval(self, job_list: &JobList) -> bool {
-        match &self.command {
+        match self {
             Executable::TempDebugSpawnEnemy(s) => game::spawn(
                 game::Entity {
                     components: Vec::from([
@@ -89,13 +84,13 @@ impl CommandData {
                 }
             }
             Executable::Cd(dest) => Self::cd(&dest),
-            Executable::Jobs => match job_list.list_jobs(self.outfile) {
+            Executable::Jobs(outfile) => match job_list.list_jobs(outfile) {
                 Ok(()) => (),
                 Err(err) => println!("Error printing jobs: {err}"),
             },
             Executable::Exit => return false,
             Executable::Noop => {}
-            Executable::NonBuiltin { command, args } => self.run_command(job_list.clone()).await,
+            Executable::NonBuiltin(data) => Self::run_command(data, job_list.clone()).await,
         };
 
         return true;
@@ -200,48 +195,46 @@ impl CommandData {
         env::set_current_dir(dest).unwrap_or_else(|error| println!("cd errored: {error}"));
     }
 
-    async fn run_command(self, job_list: JobList) {
-        if let Executable::NonBuiltin { command, args } = self.command {
-            match Command::new(&command)
-                .args(args)
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-            {
-                Err(error) => println!("{command} errored: {error}"),
-                Ok(mut child) => {
-                    let pid = child.id().unwrap_or(0);
-                    match job_list.add(pid, self.state, self.cmdline) {
-                        Ok(jid) => {
-                            if let State::FG = self.state {
+    async fn run_command(data: NonBuiltInData, job_list: JobList) {
+        match Command::new(&data.command)
+            .args(data.args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            Err(error) => println!("{} errored: {error}", data.command),
+            Ok(mut child) => {
+                let pid = child.id().unwrap_or(0);
+                match job_list.add(pid, data.state, data.cmdline) {
+                    Ok(jid) => {
+                        if let State::FG = data.state {
+                            child.wait().await.expect("Error waiting for child");
+                            if !job_list.delete(jid) {
+                                eprintln!("Failed to remove job");
+                            }
+                        } else {
+                            let cmdline = job_list.get_cmdline(jid).unwrap_or(String::new());
+                            task::spawn(async move {
+                                print!("[{jid}] ({pid}) {}", cmdline);
+
                                 child.wait().await.expect("Error waiting for child");
+
                                 if !job_list.delete(jid) {
                                     eprintln!("Failed to remove job");
                                 }
-                            } else {
-                                let cmdline = job_list.get_cmdline(jid).unwrap_or(String::new());
-                                task::spawn(async move {
-                                    print!("[{jid}] ({pid}) {}", cmdline);
-
-                                    child.wait().await.expect("Error waiting for child");
-
-                                    if !job_list.delete(jid) {
-                                        eprintln!("Failed to remove job");
-                                    }
-                                    println!("\nJob [{jid}] ({pid}) terminated");
-                                });
-                            }
-                        }
-                        Err(error) => {
-                            eprintln!("{error}");
-                            child.kill().await.expect("Error killing child");
-                            child.wait().await.expect("Error waiting for child");
+                                println!("\nJob [{jid}] ({pid}) terminated");
+                            });
                         }
                     }
+                    Err(error) => {
+                        eprintln!("{error}");
+                        child.kill().await.expect("Error killing child");
+                        child.wait().await.expect("Error waiting for child");
+                    }
                 }
-            };
-        }
+            }
+        };
     }
 }
 
@@ -293,31 +286,20 @@ impl App {
     /// This means `fg`, `fg sidjf`, and `fg --help` will return `Command::Fg`,
     /// but `fg___` will not.
 
-    fn parse(input: &str) -> CommandData {
+    fn parse(input: &str) -> Executable {
         let cmdline = input.to_string();
 
         let mut input: Vec<&str> = input.split_whitespace().collect();
         if let Some(&"spawn") = input.get(0) {
-            return CommandData {
-                command: Executable::TempDebugSpawnEnemy(String::from(
-                    input.get(1..).unwrap_or(&["goblin"]).join(" "),
-                )),
-                infile: None,
-                outfile: None,
-                state: State::FG,
-                cmdline,
-            };
+            return Executable::TempDebugSpawnEnemy(String::from(
+                input.get(1..).unwrap_or(&["goblin"]).join(" "),
+            ));
         }
+
         if let Some(&"attack") = input.get(0) {
-            return CommandData {
-                command: Executable::TempDebugAttackEnemy(String::from(
-                    input.get(1..).unwrap_or(&["goblin"]).join(" "),
-                )),
-                infile: None,
-                outfile: None,
-                state: State::FG,
-                cmdline,
-            };
+            return Executable::TempDebugAttackEnemy(String::from(
+                input.get(1..).unwrap_or(&["goblin"]).join(" "),
+            ));
         }
 
         // first check if this is a foreground or background job
@@ -350,18 +332,12 @@ impl App {
 
         // if empty then return no op
         if input.len() == 0 {
-            return CommandData {
-                command: Executable::Noop,
-                infile,
-                outfile,
-                state,
-                cmdline,
-            };
+            return Executable::Noop;
         }
 
         // extract command
 
-        let command = match input.remove(0) {
+        match input.remove(0) {
             "ls" => Self::parse_ls(input),
             "cd" => {
                 if input.len() > 1 {
@@ -371,20 +347,16 @@ impl App {
                     Executable::Cd(input.get(0).map(|v| v.to_string()))
                 }
             }
-            "jobs" => Executable::Jobs,
+            "jobs" => Executable::Jobs(outfile),
             "exit" => Executable::Exit,
-            x => Executable::NonBuiltin {
+            x => Executable::NonBuiltin(NonBuiltInData {
                 command: x.to_string(),
                 args: input.iter().map(|v| v.to_string()).collect(),
-            },
-        };
-
-        CommandData {
-            command,
-            infile,
-            outfile,
-            state,
-            cmdline,
+                state,
+                cmdline,
+                infile,
+                outfile,
+            }),
         }
     }
 
