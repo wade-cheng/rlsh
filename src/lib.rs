@@ -194,15 +194,17 @@ impl Executable {
                 } else {
                     write!(outfile, "  ")?;
                 }
-                io::stdout().flush().unwrap();
+                outfile.flush().unwrap();
             }
 
-            if data.files.len() != 1 {
+            if data.files.len() != 1 && !data.long{
                 writeln!(outfile, "")?;
             }
         }
 
-        writeln!(outfile, "")?;
+        if !data.long && data.files.len() <= 1{
+            writeln!(outfile, "")?;
+        }
 
         Ok(())
     }
