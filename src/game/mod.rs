@@ -7,6 +7,8 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+mod parser;
+
 pub const FILE_SIGNATURE: &[u8; 8] = b"\x00rlsh0.1";
 
 pub const LOCKED_DOOR_ICON: &'static str = "󱂯";
