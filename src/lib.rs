@@ -50,7 +50,7 @@ struct NonBuiltInData {
 
 /// We attempt to mimic the GNU coreutils args as much as possible. This helps
 /// users with familiarity with the terminal.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct LsData {
     /// The files to list information from. Will default to the current working
     /// directory if `files.len() == 0`.
@@ -93,7 +93,7 @@ impl Executable {
                 }
             }
             Executable::Ls(args) => {
-                if let Err(error) = Self::ls(args.clone()) {
+                if let Err(error) = Self::ls(args) {
                     println!("ls errored: {error}")
                 }
             }
