@@ -58,7 +58,7 @@ impl<T> Parser<T> {
     ///
     /// # Examples
     ///
-    /// `Parser` will do runtime error checking for incorrect grammar:
+    /// `Parser` will do runtime error checking for incorrect grammar insertion:
     ///
     /// ```should_panic
     /// Parser::new().insert((), "[unclosed brace");
