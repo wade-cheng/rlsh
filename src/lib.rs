@@ -32,19 +32,19 @@ enum Executable {
 }
 
 struct NonBuiltInData {
-    // String that contains the command to pass to exec
+    /// String that contains the command to pass to exec
     command: String,
-    // Vector of string arguments to pass as the arguments to exec
+    /// Vector of string arguments to pass as the arguments to exec
     args: Vec<String>,
-    // Weather this is to be run as a foreground or background job
+    /// Weather this is to be run as a foreground or background job
     state: State,
-    // The exact command that was entered into the command line
+    /// The exact command that was entered into the command line
     cmdline: String,
-    // An option that either contains a string to the file to replace stdin
-    // or none if stdin should be inherrited
+    /// An option that either contains a string to the file to replace stdin
+    /// or none if stdin should be inherrited
     infile: Option<String>,
-    // An option that either contains a string to the file to replace stdout
-    // or none if stdout should be inherrited
+    /// An option that either contains a string to the file to replace stdout
+    /// or none if stdout should be inherrited
     outfile: Option<String>,
 }
 
@@ -67,12 +67,15 @@ struct LsData {
     /// `-t`.
     /// Whether to sort by time.
     sort_time: bool,
-    // An option that either contains a string to the file to replace stdout
-    // or none if stdout should be inherrited
+    /// An option that either contains a string to the file to replace stdout
+    /// or none if stdout should be inherrited
     outfile: Option<String>,
 }
 
 impl Executable {
+    /// Runs an executable
+    ///
+    /// Takes in the global job list to add to or read from it if necessary
     async fn eval(self, job_list: &JobList) -> bool {
         match self {
             Executable::TempDebugSpawnEnemy(s) => game::spawn(
@@ -107,6 +110,10 @@ impl Executable {
         return true;
     }
 
+    /// Runs the ls command
+    ///
+    /// This lists all the files in the specified directories or the current directory if none is specified
+    /// Can be used with -a to print hidden files or -l for longer descriptions
     fn ls(mut data: LsData) -> Result<(), Error> {
         let mut outfile: Box<dyn Write> = match &data.outfile {
             Some(path) => Box::new(File::create(path)?),
@@ -209,6 +216,9 @@ impl Executable {
         Ok(())
     }
 
+    /// Runs the cd command
+    ///
+    /// This lets you change directories to the specified directory or home if none is specified
     fn cd(dest: &Option<String>) {
         // TODO: this computes homedir every call. we only need to when dest = None
         // I'd like to avoid creating a whole string because it's unneccessary, but
@@ -219,7 +229,13 @@ impl Executable {
         env::set_current_dir(dest).unwrap_or_else(|error| println!("cd errored: {error}"));
     }
 
-    // Runs a non built in command
+    /// Runs a non built in command
+    ///
+    /// This function either waits for the command to finish if it is a
+    /// foreground job or creates a new async thread to wait for the job
+    /// to finish if it is a background job.
+    ///
+    /// The job list is updated while the job is running.
     async fn run_command(data: NonBuiltInData, job_list: JobList) {
         // Calculate the infile
         let infile: Stdio = match data.infile {
@@ -318,6 +334,10 @@ impl App {
         io::stdout().flush().unwrap();
     }
 
+    /// Runs the application
+    ///
+    /// Parses the each lind entered and then runs the parsed executable
+    /// until the exit command is parsed.
     #[tokio::main]
     pub async fn run(self) {
         let mut input_buffer = String::new();
@@ -342,10 +362,9 @@ impl App {
 
     /// Parses a command line input into a `Command`.
     ///
-    /// Note that we match for builtins on the first word.
-    /// This means `fg`, `fg sidjf`, and `fg --help` will return `Command::Fg`,
-    /// but `fg___` will not.
-
+    /// First checks for fg/bg job state signalled by ending the command with an &
+    /// Then checks for stdin and stdout overrides signaled with < and >
+    /// Lastly parses the type of command and creates the appropriate executable.
     fn parse(input: &str) -> Executable {
         let cmdline = input.to_string();
 
@@ -420,6 +439,7 @@ impl App {
         }
     }
 
+    /// Parses the arguments for ls
     fn parse_ls(mut input: Vec<&str>, outfile: Option<String>) -> Executable {
         let mut arg_list: Vec<String> = Vec::new();
         input.retain(|word| {
