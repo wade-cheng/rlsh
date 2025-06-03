@@ -336,7 +336,7 @@ impl App {
 
     /// Runs the application
     ///
-    /// Parses the each lind entered and then runs the parsed executable
+    /// Parses the each line entered and then runs the parsed executable
     /// until the exit command is parsed.
     #[tokio::main]
     pub async fn run(self) {
