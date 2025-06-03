@@ -7,7 +7,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-mod parser;
+pub mod parser;
 
 pub const FILE_SIGNATURE: &[u8; 8] = b"\x00rlsh0.1";
 

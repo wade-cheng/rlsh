@@ -1,4 +1,4 @@
-mod game;
+pub mod game;
 mod job_list;
 
 use job_list::{JobList, State};
