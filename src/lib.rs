@@ -197,12 +197,12 @@ impl Executable {
                 outfile.flush().unwrap();
             }
 
-            if data.files.len() != 1 && !data.long{
+            if data.files.len() != 1 && !data.long {
                 writeln!(outfile, "")?;
             }
         }
 
-        if !data.long && data.files.len() <= 1{
+        if !data.long && data.files.len() <= 1 {
             writeln!(outfile, "")?;
         }
 
