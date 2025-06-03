@@ -348,9 +348,10 @@ impl App {
             match io::stdin().read_line(&mut input_buffer) {
                 Ok(0) => return, // exit on EOF (CTRL-D)
                 Ok(_) => {
-                    let command = Self::parse(&input_buffer);
-                    if !command.eval(&job_list).await {
-                        return;
+                    for command in input_buffer.split(';').map(Self::parse) {
+                        if !command.eval(&job_list).await {
+                            return;
+                        }
                     }
                 }
                 Err(_) => panic!(),
