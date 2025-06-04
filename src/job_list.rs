@@ -113,22 +113,6 @@ impl JobList {
         remove_status.is_some()
     }
 
-    // gets the jid of the current forground job
-    pub fn fg_job(&self) -> Option<usize> {
-        let JobList(arc) = self;
-        let job_list = arc.lock().unwrap();
-        job_list.fg_job
-    }
-
-    // Returns the jid associated with any pid in the job list
-    pub fn pid_to_jid(&self, pid: u32) -> Option<usize> {
-        let JobList(arc) = self;
-        let job_list = arc.lock().unwrap();
-
-        let (jid, _) = job_list.jobs.iter().find(|(_, job)| job.pid == pid)?;
-        Some(*jid)
-    }
-
     // Returns the state of any one job
     pub fn get_state(&self, jid: usize) -> Option<State> {
         let JobList(arc) = self;
@@ -136,45 +120,6 @@ impl JobList {
 
         let job = job_list.jobs.get(&jid)?;
         Some(job.state)
-    }
-
-    // Alters the state of a given job
-    pub fn set_state(&self, jid: usize, state: State) -> bool {
-        let JobList(arc) = self;
-        let mut job_list = arc.lock().unwrap();
-
-        if state == State::FG {
-            if let Some(x) = job_list.fg_job {
-                if jid != x {
-                    return false;
-                }
-            } else {
-                job_list.fg_job = Some(jid);
-            }
-        }
-
-        let temp = match job_list.jobs.get_mut(&jid) {
-            None => Some(false),
-            Some(job) => {
-                if state == job.state {
-                    Some(true)
-                } else if State::FG == job.state {
-                    job.state = state;
-                    None
-                } else {
-                    job.state = state;
-                    Some(true)
-                }
-            }
-        };
-
-        match temp {
-            None => {
-                job_list.fg_job = None;
-                true
-            }
-            Some(b) => b,
-        }
     }
 
     // gets the pid associated by a pid
@@ -281,43 +226,5 @@ mod tests {
         assert_eq!(true, list.delete(2));
         assert_eq!(None, list.get_pid(2));
         assert_eq!(Ok(1), list.add(5, State::BG, "four".to_string()));
-    }
-
-    #[test]
-    fn fg_jobs() {
-        let list = JobList::new();
-        list.add(1, State::BG, "one".to_string()).unwrap();
-        assert_eq!(None, list.fg_job());
-        list.add(2, State::FG, "two".to_string()).unwrap();
-        assert_eq!(Some(1), list.fg_job());
-    }
-
-    #[test]
-    fn pid_to_jid_test() {
-        let list = JobList::new();
-        list.add(1, State::FG, "one".to_string()).unwrap();
-        list.add(2, State::BG, "two".to_string()).unwrap();
-        list.add(3, State::BG, "three".to_string()).unwrap();
-        assert_eq!(None, list.pid_to_jid(0));
-        assert_eq!(Some(0), list.pid_to_jid(1));
-        assert_eq!(Some(1), list.pid_to_jid(2));
-        assert_eq!(Some(2), list.pid_to_jid(3));
-    }
-
-    #[test]
-    fn state_sets() {
-        let list = JobList::new();
-        list.add(1, State::FG, "one".to_string()).unwrap();
-        assert_eq!(true, list.set_state(0, State::BG));
-        assert_eq!(Some(State::BG), list.get_state(0));
-        assert_eq!(true, list.set_state(0, State::FG));
-        assert_eq!(Some(State::FG), list.get_state(0));
-        list.add(2, State::BG, "two".to_string()).unwrap();
-        assert_eq!(false, list.set_state(1, State::FG));
-        assert_eq!(Some(State::BG), list.get_state(1));
-        assert_eq!(true, list.set_state(0, State::BG));
-        assert_eq!(Some(State::BG), list.get_state(0));
-        assert_eq!(true, list.set_state(1, State::FG));
-        assert_eq!(Some(State::FG), list.get_state(1));
     }
 }
